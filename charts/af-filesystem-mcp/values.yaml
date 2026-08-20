@@ -17,7 +17,7 @@ imagePullSecrets: []
 # -- af-filesystem-mcp release pinned into the rendered pixi.toml at
 # /workspace.
 afFilesystemMcp:
-  version: "0.1.1"
+  version: "0.1.2"
   # Extra conda-forge dependencies merged into the rendered pixi.toml, as a
   # name -> version-spec map. af-filesystem-mcp already pulls in
   # af-credentials (broker mode is the only HTTP mode this chart configures).
