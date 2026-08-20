@@ -8,8 +8,8 @@ description: |
   identity JWTs); there is no shared-secret mode, since a single shared
   identity would defeat the entire point of per-user impersonation.
 type: application
-version: 0.1.2
-appVersion: "0.1.2"
+version: 0.1.3
+appVersion: "0.1.3"
 keywords:
   - filesystem
   - mcp
