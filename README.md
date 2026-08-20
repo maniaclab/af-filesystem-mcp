@@ -1,4 +1,4 @@
-# af-filesystem-mcp v0.1.0
+# af-filesystem-mcp v0.1.1
 
 An MCP server that gives an AF (Analysis Facility) user browse/read access to
 their own files on the AF's shared NFS home (`/home/<unixname>`) and Ceph data
