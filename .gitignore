@@ -1,0 +1,52 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+MANIFEST
+
+# hatch-vcs generated version file (see pyproject.toml [tool.hatch])
+src/*/_version.py
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+junit.xml
+
+# mypy / ruff caches
+.mypy_cache/
+.ruff_cache/
+.dmypy.json
+dmypy.json
+
+# Environments
+.env
+.venv/
+env/
+venv/
+ENV/
+
+# pixi
+.pixi/
+pixi.lock.bak
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# macOS
+.DS_Store

@@ -1,0 +1,122 @@
+"""Per-call impersonated subprocess execution -- the actual security boundary.
+
+Every filesystem operation for a given caller runs in a short-lived helper
+subprocess (``python -m af_filesystem_mcp.helper <op> <json-args>``) that is
+started running AS that caller's real uid/gid via
+``asyncio.create_subprocess_exec(..., user=uid, group=gid, extra_groups=...)``.
+This deliberately does **not** ``os.seteuid()``/``os.setegid()`` inside the
+long-lived async server process itself: that call is process-wide and would
+race across concurrently in-flight requests for different users sharing the
+same event loop. A fresh subprocess per call has no such race — each one
+carries exactly one identity for its entire (short) life — at the cost of
+~10-30ms of spawn overhead per call, irrelevant next to LLM round-trip
+latency and NFS RTT (maniaclab/af-mcp-platform#188).
+
+This mirrors voms-token-service's ``minting.py`` impersonation pattern
+(subprocess held to the requesting uid/gid so the kernel, and the NFS
+server, enforce every permission check against the real identity) adapted
+from ``subprocess.run`` to ``asyncio.create_subprocess_exec`` so the async
+MCP server's event loop is never blocked waiting on the helper.
+
+Outside a privileged deployment (``os.geteuid() != 0`` — local dev, unit
+tests, or ``stdio`` transport where the caller already *is* the target
+uid/gid) no impersonation is attempted or needed, exactly like
+voms-token-service's ``mint_proxy``.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import sys
+from typing import Any
+
+
+class HelperTimeoutError(Exception):
+    """Raised when the helper subprocess exceeds its wall-clock budget."""
+
+
+class HelperError(Exception):
+    """Raised when the helper subprocess exits non-zero, or its output is unusable.
+
+    The message is the helper's stderr (or a generic fallback) -- the helper
+    itself is responsible for never writing anything security-sensitive
+    (raw file contents, other users' paths) to stderr.
+    """
+
+
+async def run_helper(
+    argv: list[str],
+    *,
+    uid: int,
+    gid: int,
+    timeout: float,
+    extra_groups: list[int] | None = None,
+) -> bytes:
+    """Run the filesystem helper subprocess and return its raw stdout bytes.
+
+    *argv* is passed after ``-m af_filesystem_mcp.helper`` verbatim (never
+    through a shell) -- by convention ``[op, json_payload]``, see
+    ``af_filesystem_mcp.helper.__main__``.
+
+    Raises:
+        HelperTimeoutError: if the helper does not complete within *timeout*
+            seconds; the process is killed (not just abandoned) before the
+            error is raised.
+        HelperError: if the helper exits non-zero.
+    """
+    kwargs: dict[str, Any] = {}
+    if os.geteuid() == 0:
+        kwargs["user"] = uid
+        kwargs["group"] = gid
+        kwargs["extra_groups"] = extra_groups if extra_groups is not None else []
+
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "af_filesystem_mcp.helper",
+        *argv,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        **kwargs,
+    )
+
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        proc.kill()
+        await proc.wait()
+        msg = f"filesystem helper timed out after {timeout}s running {argv[:1]!r}"
+        raise HelperTimeoutError(msg) from None
+
+    if proc.returncode != 0:
+        detail = stderr.decode(errors="replace").strip()
+        msg = detail or f"filesystem helper exited {proc.returncode}"
+        raise HelperError(msg)
+
+    return stdout
+
+
+async def run_helper_json(
+    argv: list[str],
+    *,
+    uid: int,
+    gid: int,
+    timeout: float,
+    extra_groups: list[int] | None = None,
+) -> Any:
+    """Like ``run_helper``, but parse stdout as JSON.
+
+    Raises:
+        HelperError: also when the helper's stdout is not valid JSON --
+            treated as a helper-contract violation, not a caller error.
+    """
+    stdout = await run_helper(
+        argv, uid=uid, gid=gid, timeout=timeout, extra_groups=extra_groups
+    )
+    try:
+        return json.loads(stdout)
+    except json.JSONDecodeError as exc:
+        msg = f"filesystem helper produced non-JSON output: {exc}"
+        raise HelperError(msg) from exc
