@@ -1,0 +1,76 @@
+[workspace]
+authors = ["Giordon Stark <kratsg@gmail.com>"]
+name = "af-filesystem-mcp"
+channels = ["conda-forge"]
+platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
+
+[dependencies]
+af-filesystem-mcp = { path = "./" }
+setuptools = "*"
+# Broker-mode client library (its [mcp] extra's mcp dependency is already a
+# direct dependency of af-filesystem-mcp itself)
+af-credentials = ">=0.1.1"
+
+[feature.py310.dependencies]
+python = "<3.11,>=3.10"
+
+[feature.py311.dependencies]
+python = "<3.12,>=3.11"
+
+[feature.py312.dependencies]
+python = "<3.13,>=3.12"
+
+[feature.py313.dependencies]
+python = "<3.14,>=3.13"
+
+[feature.test.dependencies]
+pytest = ">=9"
+pytest-cov = ">=3"
+pytest-asyncio = ">=0.24"
+httpx = "*"
+
+[feature.test.tasks]
+test = { cmd = "pytest -m 'not slow'", description = "Run quick tests (skip slow)" }
+test-cov = { cmd = "pytest -m 'not slow' --cov=af_filesystem_mcp --cov-report=term --cov-report=html", description = "Run quick tests with coverage" }
+test-slow = { cmd = "pytest --runslow", description = "Run tests including slow tests" }
+test-all = { cmd = "pytest --cov=af_filesystem_mcp", description = "Run all tests with coverage" }
+
+[feature.helm.dependencies]
+kubernetes-helm = "*"
+
+[feature.helm.tasks]
+helm-lint = { cmd = """
+helm lint charts/af-filesystem-mcp -f charts/af-filesystem-mcp/ci/broker-values.yaml \
+&& helm template smoke charts/af-filesystem-mcp -f charts/af-filesystem-mcp/ci/broker-values.yaml > /dev/null
+""", description = "Lint the af-filesystem-mcp Helm chart and smoke-render it" }
+helm-template = { cmd = "helm template smoke charts/af-filesystem-mcp -f charts/af-filesystem-mcp/ci/broker-values.yaml", description = "Render the chart with CI/smoke values" }
+
+[feature.dev.dependencies]
+pre-commit = "*"
+identify = ">=1.4.20"
+pylint = ">=3.2"
+mypy = "*"
+ruff = "*"
+python-build = "*"
+twine = "*"
+
+[feature.dev.tasks]
+pre-commit = { cmd = "pre-commit run --all-files", description = "Run pre-commit hooks on all files" }
+pylint = { cmd = "pylint af_filesystem_mcp", description = "Run PyLint on af-filesystem-mcp package" }
+pre-commit-install = { cmd = "pre-commit install", description = "Install pre-commit git hooks" }
+build-clean = { cmd = "rm -rf build dist", description = "Clean build artifacts" }
+build = { cmd = "python -m build", depends-on = ["build-clean"], description = "Build SDist and wheel distributions", outputs = ["dist"] }
+build-check = { cmd = "twine check --strict ./dist/*", depends-on = ["build"], description = "Run twine to check" }
+
+[environments]
+dev = ["dev"]
+helm = { features = ["helm"], no-default-feature = true }
+py310 = ["test", "py310"]
+py311 = ["test", "py311"]
+py312 = ["test", "py312"]
+py313 = ["test", "py313"]
+
+[tasks]
+lint = { depends-on = ["pre-commit", "pylint"], description = "Run all linting (pre-commit + pylint)" }
+check = { depends-on = ["lint", "test"], description = "Quick check: lint + basic tests" }
+check-all = { depends-on = ["lint", "test-all"], description = "Comprehensive check: lint + all tests" }

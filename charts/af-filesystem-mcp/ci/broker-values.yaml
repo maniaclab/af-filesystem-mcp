@@ -1,0 +1,10 @@
+# CI/smoke values: the only supported HTTP mode (broker), with a dummy
+# broker URL so `helm lint`/`helm template` can render without a real
+# deployment target.
+auth:
+  broker:
+    brokerUrl: https://broker.example.com
+homes:
+  existingClaim: af-filesystem-mcp-homes
+data:
+  existingClaim: af-filesystem-mcp-data

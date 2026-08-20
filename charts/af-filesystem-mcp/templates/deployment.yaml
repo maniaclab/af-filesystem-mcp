@@ -1,0 +1,161 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "af-filesystem-mcp.fullname" . }}
+  labels:
+    {{- include "af-filesystem-mcp.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "af-filesystem-mcp.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        # Restart pods when the rendered pixi manifest changes.
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "af-filesystem-mcp.selectorLabels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      # This pod never talks to the Kubernetes API; withholding the
+      # ServiceAccount token removes an entire credential class from a pod
+      # that already holds two NFS/Ceph-backed PVC mounts spanning every AF
+      # user's files (mirrors voms-token-service's deployment).
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- if or .Values.serviceAccount.create .Values.serviceAccount.name }}
+      serviceAccountName: {{ include "af-filesystem-mcp.serviceAccountName" . }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+        - name: pixi-install
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.initSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              cp /pixi-config/pixi.toml /workspace/pixi.toml
+              {{- if .Values.afFilesystemMcp.pixiLockContent }}
+              cp /pixi-config/pixi.lock /workspace/pixi.lock
+              {{- end }}
+              pixi install --manifest-path /workspace/pixi.toml
+          volumeMounts:
+            - name: pixi-config
+              mountPath: /pixi-config
+            - name: workspace
+              mountPath: /workspace
+          resources:
+            {{- toYaml .Values.initResources | nindent 12 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              eval "$(pixi shell-hook --manifest-path /workspace/pixi.toml --shell bash)"
+              exec af-filesystem-mcp serve {{ include "af-filesystem-mcp.serveArgs" . }}
+          env:
+            - name: AF_FILESYSTEM_MCP_BROKER_URL
+              value: {{ .Values.auth.broker.brokerUrl | quote }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            # The homes and data PVCs -- mounted READ-ONLY. Every actual
+            # read happens in a helper subprocess impersonating the calling
+            # user's real uid/gid (af_filesystem_mcp.impersonate); the
+            # server process itself never needs -- and given
+            # readOnlyRootFilesystem plus these mounts, cannot -- write
+            # anywhere under either root. This is a v1 read-only server.
+            - name: homes
+              mountPath: {{ .Values.homes.mountPath }}
+              readOnly: true
+            - name: data
+              mountPath: {{ .Values.data.mountPath }}
+              readOnly: true
+            {{- with .Values.extraVolumeMounts }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: pixi-config
+          configMap:
+            name: {{ include "af-filesystem-mcp.fullname" . }}-pixi
+            items:
+              - key: pixi.toml
+                path: pixi.toml
+              {{- if .Values.afFilesystemMcp.pixiLockContent }}
+              - key: pixi.lock
+                path: pixi.lock
+              {{- end }}
+        - name: workspace
+          emptyDir: {}
+        - name: homes
+          persistentVolumeClaim:
+            claimName: {{ .Values.homes.existingClaim }}
+            readOnly: true
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.data.existingClaim }}
+            readOnly: true
+        {{- with .Values.extraVolumes }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}

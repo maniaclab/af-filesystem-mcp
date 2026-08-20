@@ -1,0 +1,201 @@
+# Default values for af-filesystem-mcp.
+# This chart deploys af-filesystem-mcp over HTTP transport in broker mode --
+# the only HTTP mode this backend supports (see README.md and CLAUDE.md for
+# why a shared-secret mode would defeat the whole point of per-user
+# impersonation).
+
+# -- Container image. There is no published af-filesystem-mcp image; the
+# chart runs the prefix-dev pixi image and installs af-filesystem-mcp at pod
+# startup (see initContainer), exactly like ami-mcp's chart.
+image:
+  repository: ghcr.io/prefix-dev/pixi
+  tag: "0.69.0-jammy"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# -- af-filesystem-mcp release pinned into the rendered pixi.toml at
+# /workspace.
+afFilesystemMcp:
+  version: "0.1.0"
+  # Extra conda-forge dependencies merged into the rendered pixi.toml, as a
+  # name -> version-spec map. af-filesystem-mcp already pulls in
+  # af-credentials (broker mode is the only HTTP mode this chart configures).
+  extraPixiDependencies: {}
+  # Frozen pixi.lock content for reproducible installs. Supply with, e.g.:
+  #   helm install ... --set-file afFilesystemMcp.pixiLockContent=pixi.lock
+  pixiLockContent: ""
+
+replicaCount: 2
+
+# -- af-filesystem-mcp / uvicorn log level: debug | info | warning | error.
+logLevel: info
+
+# -- IPs trusted for X-Forwarded-* headers. "*" trusts the in-cluster ingress
+# (here: the broker aggregator, the sole intended caller).
+forwardedAllowIps: "*"
+
+server:
+  host: "0.0.0.0"
+  port: 8000
+  # Public URL clients reach the server at (--resource-url). Backend-only:
+  # the sole caller is the broker aggregator (mirrors ami-mcp's chart), so
+  # this is normally the in-cluster Service URL, not a public hostname.
+  resourceUrl: ""
+
+# Per-call caps enforced server-side regardless of what a tool call asks
+# for -- see af_filesystem_mcp.tools._helpers and helper/ops.py for the
+# hard maximums each of these is clamped against.
+limits:
+  # Wall-clock budget per filesystem call (--timeout-seconds) before the
+  # impersonated helper subprocess is killed.
+  timeoutSeconds: 10
+  # Per-user concurrency cap on in-flight filesystem calls
+  # (--max-concurrent-calls-per-user) -- one user's runaway fs_grep degrades
+  # only their own throughput, not everyone else's NFS RTT.
+  maxConcurrentCallsPerUser: 4
+
+# Broker mode (af-mcp-platform docs): bearers are broker-issued identity JWTs
+# (aud=af-filesystem-mcp) carrying uid/gid/unixname POSIX claims
+# (identityProviders[].targetOptions.af-filesystem-mcp.includePosix: true).
+# There is no redeem step and no other HTTP auth mode for this chart.
+auth:
+  broker:
+    # AF credential broker base URL (required; env AF_FILESYSTEM_MCP_BROKER_URL).
+    brokerUrl: ""
+    # JWKS URL for verifying broker-issued JWTs. Empty = derived by the
+    # server as <brokerUrl>/.well-known/jwks.json.
+    jwksUrl: ""
+    # Expected iss claim of broker-issued JWTs. Empty = brokerUrl.
+    issuer: ""
+    # Expected aud claim of broker-issued JWTs.
+    audience: "af-filesystem-mcp"
+
+# The two confinement root PREFIXES every caller's per-user roots
+# (<root>/<unixname>) are built under -- see af_filesystem_mcp.roots.RootsConfig.
+# Mounted read-only: this is a v1 read-only server, and nothing it runs ever
+# needs to write into either mount (see securityContext below).
+homes:
+  # NFS-backed PVC holding every AF user's home directory
+  # (nfs.af.uchicago.edu:/export/home, the same export voms-token-service's
+  # af-homes PVC binds -- see that chart's pv-homes.yaml/pvc-homes.yaml for
+  # the exact static-PV pattern this chart expects a sibling flux_apps
+  # manifest to replicate under a NEW PV/PVC name scoped to THIS namespace;
+  # one PV binds to exactly one PVC, so voms-token-service's own af-homes
+  # PVC/namespace cannot be shared directly).
+  existingClaim: "af-filesystem-mcp-homes"
+  mountPath: "/home"
+data:
+  # PVC holding every AF user's Ceph-backed data area. UNLIKE homes, the
+  # exact mount mechanism backing a real per-user /data/<unixname> tree is
+  # not yet confirmed in this chart's design (the only observed /data
+  # convention on the AF today is a node-level hostPath mount used by
+  # htcondor's execute pods, e.g. /data/projects -- not obviously a PVC);
+  # this default name is a placeholder pending that verification (see
+  # maniaclab/af-mcp-platform#188's platform-wiring checklist).
+  existingClaim: "af-filesystem-mcp-data"
+  mountPath: "/data"
+
+# -- Extra environment variables for the main container (free-form list of
+# corev1.EnvVar). Use for settings the chart does not template.
+extraEnv: []
+
+ingress:
+  # Disabled by default, like ami-mcp's chart: the sole intended caller is
+  # the broker aggregator, reached over the in-cluster Service, and the
+  # platform's NetworkPolicy admits nothing else anyway.
+  enabled: false
+  className: nginx
+  host: ""
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  tls:
+    enabled: true
+    secretName: ""
+
+service:
+  type: ClusterIP
+  port: 80
+
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+
+# Resources for the pixi-install init container (install is the heavy step).
+initResources:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# -- Extra volumes / volume mounts rendered verbatim into the pod spec and
+# the main container (any corev1.Volume / corev1.VolumeMount). Not needed
+# for homes/data (see the dedicated blocks above) -- this is an escape hatch
+# for anything else a deployment needs, mirroring ami-mcp's chart.
+extraVolumes: []
+extraVolumeMounts: []
+
+# -- Pod-level securityContext. runAsUser/runAsGroup 0: the pixi-install
+# init container needs to write into the image's default locations, and the
+# main container's own impersonation mechanism needs to START as root (see
+# containerSecurityContext below) even though it never touches a user's
+# bytes AS root -- every actual read goes through a helper subprocess that
+# has already dropped to the caller's real uid/gid before opening anything
+# (af_filesystem_mcp.impersonate). This is why, unlike voms-token-service
+# (which reads ~/.globus/*.pem directly as root+CAP_DAC_READ_SEARCH for one
+# code path before impersonating), this chart adds NO CAP_DAC_READ_SEARCH at
+# all: there is no code path in this server where root itself reads user
+# data.
+podSecurityContext:
+  runAsUser: 0
+  runAsGroup: 0
+  seccompProfile:
+    type: RuntimeDefault
+
+# -- Container-level securityContext for the main container. CAP_SETUID/
+# CAP_SETGID are required for the impersonated-subprocess mechanism itself
+# (os.geteuid()==0 branch in af_filesystem_mcp.impersonate.run_helper);
+# nothing else is needed. allowPrivilegeEscalation: false is compatible with
+# holding CAP_SETUID/CAP_SETGID and calling setuid()/setgid() from a process
+# that already carries those capabilities -- no_new_privs (what
+# allowPrivilegeEscalation controls) blocks gaining NEW privilege via
+# exec'ing a setuid-bit binary or file capabilities, not a capability the
+# process's own security context already grants it. Verified against
+# voms-token-service's own shipped containerSecurityContext, which sets
+# both together in production.
+containerSecurityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: [ALL]
+    add: [SETUID, SETGID]
+
+# -- Container-level securityContext for the pixi-install init container.
+# No impersonation capability here (it never touches user data); a no-op
+# safe default, mirroring ami-mcp's chart -- do NOT default
+# runAsNonRoot/readOnlyRootFilesystem here without first verifying the pixi
+# image + install flow tolerates them.
+initSecurityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault

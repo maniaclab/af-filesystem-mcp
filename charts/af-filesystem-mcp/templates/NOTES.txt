@@ -1,0 +1,39 @@
+af-filesystem-mcp has been deployed in broker mode (the only HTTP mode this
+chart supports).
+
+MCP endpoint path: /mcp/
+{{- if .Values.ingress.enabled }}
+
+Public URL: https://{{ .Values.ingress.host }}
+  MCP endpoint: https://{{ .Values.ingress.host }}/mcp/
+{{- else }}
+
+No ingress configured. Reach the service in-cluster:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "af-filesystem-mcp.fullname" . }} 8080:{{ .Values.service.port }}
+  # then http://127.0.0.1:8080/mcp/
+{{- end }}
+
+Broker mode: bearers are AF-broker-issued identity JWTs verified against
+{{ .Values.auth.broker.brokerUrl }}, carrying uid/gid/unixname POSIX claims.
+Every filesystem call impersonates that identity in a helper subprocess --
+the server itself holds no filesystem access of its own beyond the two
+read-only PVC mounts ({{ .Values.homes.mountPath }}, {{ .Values.data.mountPath }}).
+
+This is a v1 READ-ONLY server: fs_list, fs_stat, fs_read, fs_grep. There is
+no write, delete, rename, or command-execution tool.
+
+  Example MCP client config (via the af-mcp-platform broker/aggregator,
+  not directly against this Service):
+    {
+      "mcpServers": {
+        "af-filesystem": {
+          "type": "http",
+          "url": "https://mcp.af.uchicago.edu/mcp",
+          "headers": { "Authorization": "Bearer <broker-issued token>" }
+        }
+      }
+    }
+
+Verify the rollout:
+  kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "af-filesystem-mcp.fullname" . }}
+  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}

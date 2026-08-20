@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "af-filesystem-mcp.fullname" . }}-pixi
+  labels:
+    {{- include "af-filesystem-mcp.labels" . | nindent 4 }}
+data:
+  pixi.toml: |
+    [workspace]
+    channels = ["conda-forge"]
+    name = "af-filesystem-mcp"
+    platforms = ["linux-64", "linux-aarch64"]
+    version = "0.1.0"
+
+    [dependencies]
+    af-filesystem-mcp = "=={{ .Values.afFilesystemMcp.version }}"
+    {{- range $name, $spec := .Values.afFilesystemMcp.extraPixiDependencies }}
+    {{ $name }} = "{{ $spec }}"
+    {{- end }}
+  {{- if .Values.afFilesystemMcp.pixiLockContent }}
+  pixi.lock: |
+    {{- .Values.afFilesystemMcp.pixiLockContent | nindent 4 }}
+  {{- end }}
