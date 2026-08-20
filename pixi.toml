@@ -67,6 +67,7 @@ helm-template = { cmd = "helm template smoke charts/af-filesystem-mcp -f charts/
 pre-commit = "*"
 identify = ">=1.4.20"
 pylint = ">=3.2"
+tbump = ">=6.7.0"
 mypy = "*"
 ruff = "*"
 python-build = "*"

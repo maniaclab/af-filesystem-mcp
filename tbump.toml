@@ -1,0 +1,62 @@
+github_url = "https://github.com/maniaclab/af-filesystem-mcp"
+
+[version]
+current = "0.1.0"
+
+# Example of a semver regexp.
+# Make sure this matches current_version before
+# using tbump
+regex = '''
+  (?P<major>\d+)
+  \.
+  (?P<minor>\d+)
+  \.
+  (?P<patch>\d+)
+  (rc
+    (?P<candidate>\d+)
+  )?
+  '''
+
+[git]
+# The current version will get updated when tbump is run
+message_template = "Bump version: 0.1.0 → {new_version}"
+tag_template = "v{new_version}"
+
+# For each file to patch, add a [[file]] config
+# section containing the path of the file, relative to the
+# tbump.toml location.
+[[file]]
+src = "tbump.toml"
+# Restrict search to make it explicit why tbump.toml
+# is even included as a file to bump, as it will get
+# its version.current attribute bumped anyway.
+search = "Bump version: {current_version} → "
+
+[[file]]
+src = "README.md"
+
+# Helm chart: track the af-filesystem-mcp app version the chart deploys, and
+# keep the chart's own `version` in lockstep too -- Flux's default
+# ChartVersion reconcile strategy only repackages the chart when
+# Chart.yaml's `version` changes, so if it's left to drift independently,
+# template changes silently stop being picked up (see the identical fix +
+# incident in ami-mcp's and rucio-mcp's tbump.toml: `version` sat at "0.1.0"
+# untouched since each chart's first commit, well past the point they grew
+# broker/x509 support, and Flux kept serving a stale package).
+[[file]]
+src = "charts/af-filesystem-mcp/Chart.yaml"
+search = 'appVersion: "{current_version}"'
+
+[[file]]
+src = "charts/af-filesystem-mcp/Chart.yaml"
+search = 'version: {current_version}'
+
+[[file]]
+src = "charts/af-filesystem-mcp/values.yaml"
+search = 'version: "{current_version}"'
+
+[[field]]
+# the name of the field
+name = "candidate"
+# the default value to use, if there is no match
+default = ""
