@@ -133,7 +133,9 @@ def _make_broker_app(
 
     mcp.custom_route("/healthz", methods=["GET"])(_healthz)
 
-    return mcp.streamable_http_app(streamable_http_path="/mcp", host=host)
+    return mcp.streamable_http_app(
+        streamable_http_path="/mcp", host=host, stateless_http=True
+    )
 
 
 def _configure_logging(log_level: str) -> None:
