@@ -3,6 +3,7 @@ authors = ["Giordon Stark <kratsg@gmail.com>"]
 name = "af-filesystem-mcp"
 channels = ["conda-forge"]
 platforms = ["linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
+preview = ["pixi-build"]
 
 [dependencies]
 af-filesystem-mcp = { path = "./" }
@@ -10,6 +11,23 @@ setuptools = "*"
 # Broker-mode client library (its [mcp] extra's mcp dependency is already a
 # direct dependency of af-filesystem-mcp itself)
 af-credentials = ">=0.1.1"
+
+[package]
+name = "af-filesystem-mcp"
+version = "latest"
+
+[package.build]
+backend = { name = "pixi-build-python", version = "*" }
+config = { noarch = true }
+
+[package.host-dependencies]
+python = ">=3.10"
+uv = "*"
+hatchling = ">=1.25"
+hatch-vcs = ">=0.4"
+
+[package.run-dependencies]
+mcp = ">=2.0.0,<3"
 
 [feature.py310.dependencies]
 python = "<3.11,>=3.10"
