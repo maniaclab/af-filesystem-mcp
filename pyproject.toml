@@ -37,7 +37,7 @@ dependencies = [
 # POSIX claims. Unlike ami-mcp/rucio-mcp's broker mode, this backend never
 # redeems an x509 proxy -- the POSIX claims are all it needs.
 broker = [
-  "af-credentials[mcp]>=0.1.1",
+  "af-credentials[mcp]>=0.2.0",
 ]
 
 [project.scripts]

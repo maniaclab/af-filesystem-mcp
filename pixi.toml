@@ -10,7 +10,7 @@ af-filesystem-mcp = { path = "./" }
 setuptools = "*"
 # Broker-mode client library (its [mcp] extra's mcp dependency is already a
 # direct dependency of af-filesystem-mcp itself)
-af-credentials = ">=0.1.1"
+af-credentials = ">=0.2.0"
 
 [package]
 name = "af-filesystem-mcp"
