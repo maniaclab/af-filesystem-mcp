@@ -64,9 +64,7 @@ class TestImpersonationWhenRoot:
             fake_create_subprocess_exec,
         )
 
-        result = await run_helper(
-            ["list", "{}"], uid=4321, gid=8765, timeout=5.0
-        )
+        result = await run_helper(["list", "{}"], uid=4321, gid=8765, timeout=5.0)
 
         assert result == b'{"ok": true}'
         assert recorded["user"] == 4321
@@ -184,6 +182,4 @@ class TestHelperErrorHandling:
         )
 
         with pytest.raises(HelperError):
-            await impersonate.run_helper_json(
-                ["list", "{}"], uid=1, gid=1, timeout=5.0
-            )
+            await impersonate.run_helper_json(["list", "{}"], uid=1, gid=1, timeout=5.0)

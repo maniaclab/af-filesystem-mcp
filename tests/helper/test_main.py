@@ -115,9 +115,7 @@ class TestErrorHandling:
             main(["list", _payload(relative="")])
         assert "root" in capsys.readouterr().err
 
-    def test_wrong_argc_is_an_error(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_wrong_argc_is_an_error(self, capsys: pytest.CaptureFixture[str]) -> None:
         with pytest.raises(SystemExit):
             main(["list"])
         assert "usage" in capsys.readouterr().err

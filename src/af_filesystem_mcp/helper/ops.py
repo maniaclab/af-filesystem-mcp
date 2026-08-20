@@ -30,7 +30,7 @@ import errno
 import os
 import stat as stat_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, NamedTuple
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -269,6 +269,54 @@ def read_file(
     }
 
 
+class _EntryOutcome(NamedTuple):
+    """What one scandir entry turned out to be, for `_iter_files_no_follow`'s walk."""
+
+    is_file: bool
+    sub_fd: int | None  # set only when is_file is False (a directory to descend into)
+
+
+def _classify_scanned_entry(
+    entry: os.DirEntry[str], dir_fd: int, *, depth: int, max_depth: int
+) -> _EntryOutcome | None:
+    """Classify one scandir *entry* as a file, a directory to descend into, or None to skip.
+
+    Skipped for any of: an ``lstat`` failure, a symlink (never followed --
+    see the module docstring), a directory beyond *max_depth*, or a
+    directory that fails to open (permission denied, or it vanished/changed
+    between the scandir and the open). None of these are errors worth
+    raising -- a single bad entry just doesn't appear in the walk.
+    """
+    try:
+        st = entry.stat(follow_symlinks=False)
+    except OSError:
+        return None
+    if stat_module.S_ISLNK(st.st_mode):
+        return None
+    if stat_module.S_ISDIR(st.st_mode):
+        if depth + 1 > max_depth:
+            return None
+        sub_fd = _open_subdir_no_follow(entry.name, dir_fd)
+        if sub_fd is None:
+            return None
+        return _EntryOutcome(is_file=False, sub_fd=sub_fd)
+    if stat_module.S_ISREG(st.st_mode):
+        return _EntryOutcome(is_file=True, sub_fd=None)
+    return None
+
+
+def _open_subdir_no_follow(entry_name: str, dir_fd: int) -> int | None:
+    """Open *entry_name* as a subdirectory fd under *dir_fd*, or None if it can't be opened."""
+    try:
+        return os.open(
+            entry_name,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+            dir_fd=dir_fd,
+        )
+    except OSError:
+        return None
+
+
 def _iter_files_no_follow(
     root: Path, relative: str, *, max_depth: int
 ) -> Iterator[tuple[int, str, str]]:
@@ -295,26 +343,16 @@ def _iter_files_no_follow(
                     scanned = sorted(it, key=lambda e: e.name)
                 for entry in scanned:
                     rel_name = f"{prefix}/{entry.name}" if prefix else entry.name
-                    try:
-                        st = entry.stat(follow_symlinks=False)
-                    except OSError:
+                    outcome = _classify_scanned_entry(
+                        entry, dir_fd, depth=depth, max_depth=max_depth
+                    )
+                    if outcome is None:
                         continue
-                    if stat_module.S_ISLNK(st.st_mode):
-                        continue
-                    if stat_module.S_ISDIR(st.st_mode):
-                        if depth + 1 > max_depth:
-                            continue
-                        try:
-                            sub_fd = os.open(
-                                entry.name,
-                                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
-                                dir_fd=dir_fd,
-                            )
-                        except OSError:
-                            continue
-                        stack.append((sub_fd, rel_name, depth + 1))
-                    elif stat_module.S_ISREG(st.st_mode):
+                    if outcome.is_file:
                         yield dir_fd, entry.name, rel_name
+                    else:
+                        assert outcome.sub_fd is not None
+                        stack.append((outcome.sub_fd, rel_name, depth + 1))
             finally:
                 if dir_fd != root_fd:
                     os.close(dir_fd)
@@ -360,7 +398,10 @@ def grep_files(
         per_file_matches = 0
         with os.fdopen(fd, "rb") as fh:
             for line_number, raw_line in enumerate(fh, start=1):
-                if per_file_matches >= max_matches_per_file or len(matches) >= max_matches:
+                if (
+                    per_file_matches >= max_matches_per_file
+                    or len(matches) >= max_matches
+                ):
                     truncated = True
                     break
                 try:

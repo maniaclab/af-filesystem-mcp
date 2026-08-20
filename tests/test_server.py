@@ -29,6 +29,7 @@ class TestMakeStdioMcp:
         self, tmp_path: Path
     ) -> None:
         mcp = _make_stdio_mcp(data_root=tmp_path)
+        assert mcp.settings.lifespan is not None
         async with mcp.settings.lifespan(mcp) as ctx_dict:
             identity = await ctx_dict["identity_resolver"](None)
             assert identity.unixname

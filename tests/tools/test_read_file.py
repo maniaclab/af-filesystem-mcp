@@ -44,7 +44,9 @@ class TestFsRead:
         fs_roots: tuple[Path, Path],
     ) -> None:
         home_root, _ = fs_roots
-        (home_root / "alice" / "f.txt").write_text("\n".join(f"L{i}" for i in range(10)))
+        (home_root / "alice" / "f.txt").write_text(
+            "\n".join(f"L{i}" for i in range(10))
+        )
 
         output = await fs_read(
             root="home", path="f.txt", mode="head", num_lines=2, ctx=mock_ctx
@@ -61,7 +63,9 @@ class TestFsRead:
     ) -> None:
         home_root, _ = fs_roots
         (home_root / "alice" / "target.txt").write_text("secret")
-        (home_root / "alice" / "link.txt").symlink_to(home_root / "alice" / "target.txt")
+        (home_root / "alice" / "link.txt").symlink_to(
+            home_root / "alice" / "target.txt"
+        )
 
         output = await fs_read(root="home", path="link.txt", ctx=mock_ctx)
 

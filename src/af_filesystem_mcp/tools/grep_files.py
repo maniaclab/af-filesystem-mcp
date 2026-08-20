@@ -64,7 +64,9 @@ def register(mcp: MCPServer) -> None:
         except Exception as exc:  # noqa: BLE001
             return format_error(
                 exc,
-                hints=["Use `fs_list` to confirm the directory exists and check its size."],
+                hints=[
+                    "Use `fs_list` to confirm the directory exists and check its size."
+                ],
             )
         output = _format_matches(result)
         return append_next_actions(

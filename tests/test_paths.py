@@ -161,9 +161,7 @@ class TestResolveConfinedRootItselfIsSymlink:
         resolved = resolve_confined(linked_root, "notes.txt")
         assert resolved == (real_root / "notes.txt").resolve()
 
-    def test_still_rejects_escape_when_root_is_a_symlink(
-        self, tmp_path: Path
-    ) -> None:
+    def test_still_rejects_escape_when_root_is_a_symlink(self, tmp_path: Path) -> None:
         real_root = tmp_path / "real-alice"
         real_root.mkdir()
         linked_root = tmp_path / "alice"
@@ -189,9 +187,7 @@ class TestUserRoots:
 
     def test_rejects_empty_unixname(self) -> None:
         with pytest.raises(ValueError, match="unixname"):
-            UserRoots.for_unixname(
-                "", home_root=Path("/home"), data_root=Path("/data")
-            )
+            UserRoots.for_unixname("", home_root=Path("/home"), data_root=Path("/data"))
 
 
 def test_resolve_confined_never_raises_on_permission_denied_stat(

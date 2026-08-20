@@ -92,7 +92,9 @@ def main() -> None:
     )
     serve_parser.add_argument(
         "--broker-audience",
-        default=os.environ.get("AF_FILESYSTEM_MCP_BROKER_AUDIENCE", "af-filesystem-mcp"),
+        default=os.environ.get(
+            "AF_FILESYSTEM_MCP_BROKER_AUDIENCE", "af-filesystem-mcp"
+        ),
         help=(
             "Expected aud claim of broker-issued JWTs "
             "(env: AF_FILESYSTEM_MCP_BROKER_AUDIENCE; default: af-filesystem-mcp)"
@@ -107,7 +109,9 @@ def main() -> None:
     serve_parser.add_argument(
         "--max-concurrent-calls-per-user",
         type=int,
-        default=int(os.environ.get("AF_FILESYSTEM_MCP_MAX_CONCURRENT_CALLS_PER_USER", "4")),
+        default=int(
+            os.environ.get("AF_FILESYSTEM_MCP_MAX_CONCURRENT_CALLS_PER_USER", "4")
+        ),
         help="Per-user concurrency cap on in-flight filesystem calls (default: 4)",
     )
     serve_parser.add_argument(

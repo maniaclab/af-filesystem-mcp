@@ -26,9 +26,16 @@ voms-token-service's ``mint_proxy``.
 
 from __future__ import annotations
 
-import asyncio
+# `as os`/`as asyncio` (PEP 484's explicit-reexport self-import) rather than a
+# plain import: tests monkeypatch these as module attributes
+# (impersonate.os.geteuid, impersonate.asyncio.create_subprocess_exec), which
+# mypy's implicit-reexport check otherwise flags as accessing an unexported
+# name from outside the module. ruff's PLC0414 and pylint's useless-import-
+# alias both consider the same syntax a no-op alias, so both are suppressed
+# here -- the linters disagree with mypy, mypy wins.
+import asyncio as asyncio  # noqa: PLC0414  # pylint: disable=useless-import-alias
 import json
-import os
+import os as os  # noqa: PLC0414  # pylint: disable=useless-import-alias
 import sys
 from typing import Any
 

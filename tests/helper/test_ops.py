@@ -184,17 +184,13 @@ class TestReadFileLineModes:
         assert result["content"] == "line7\nline8\nline9\n"
 
     def test_lines_returns_requested_range(self, root: Path) -> None:
-        result = ops.read_file(
-            root, "f.txt", mode="lines", start_line=2, num_lines=3
-        )
+        result = ops.read_file(root, "f.txt", mode="lines", start_line=2, num_lines=3)
         assert result["content"] == "line2\nline3\nline4\n"
 
     def test_lines_range_past_end_of_file_returns_available_lines_only(
         self, root: Path
     ) -> None:
-        result = ops.read_file(
-            root, "f.txt", mode="lines", start_line=8, num_lines=10
-        )
+        result = ops.read_file(root, "f.txt", mode="lines", start_line=8, num_lines=10)
         assert result["content"] == "line8\nline9\n"
 
 

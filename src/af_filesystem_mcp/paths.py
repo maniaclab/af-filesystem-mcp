@@ -81,7 +81,9 @@ def resolve_confined(root: Path, relative: str) -> Path:
     return resolved
 
 
-def secure_open_confined(root: Path, relative: str, flags: int, *, mode: int = 0o600) -> int:
+def secure_open_confined(
+    root: Path, relative: str, flags: int, *, mode: int = 0o600
+) -> int:
     """Open *relative* under *root*, refusing to follow any symlink anywhere along the path.
 
     ``resolve_confined`` (above) is a string-level check performed once,
@@ -150,12 +152,12 @@ def secure_open_confined(root: Path, relative: str, flags: int, *, mode: int = 0
             os.close(current_fd)
         os.close(root_fd)
         raise
-    else:
-        # The loop ran at least once (relative is non-empty, checked above),
-        # so current_fd now holds the final component's own fd, distinct
-        # from root_fd, which is no longer needed as a dir_fd anchor.
-        os.close(root_fd)
-        return current_fd
+    # The except branch above always re-raises, so reaching here means the
+    # loop ran at least once (relative is non-empty, checked above) with no
+    # exception -- current_fd now holds the final component's own fd,
+    # distinct from root_fd, which is no longer needed as a dir_fd anchor.
+    os.close(root_fd)
+    return current_fd
 
 
 @dataclass(frozen=True)
@@ -166,7 +168,9 @@ class UserRoots:
     data: Path
 
     @classmethod
-    def for_unixname(cls, unixname: str, *, home_root: Path, data_root: Path) -> UserRoots:
+    def for_unixname(
+        cls, unixname: str, *, home_root: Path, data_root: Path
+    ) -> UserRoots:
         """Build the per-user roots ``{home_root}/{unixname}`` and ``{data_root}/{unixname}``.
 
         Rejects a *unixname* containing a path separator or ``..`` component,

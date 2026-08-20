@@ -31,7 +31,9 @@ class TestFsGrep:
         fs_roots: tuple[Path, Path],
     ) -> None:
         home_root, _ = fs_roots
-        (home_root / "alice" / "log.txt").write_text("line one\nERROR found\nline three\n")
+        (home_root / "alice" / "log.txt").write_text(
+            "line one\nERROR found\nline three\n"
+        )
 
         output = await fs_grep(root="home", pattern="ERROR", path="", ctx=mock_ctx)
 

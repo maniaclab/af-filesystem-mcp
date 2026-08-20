@@ -32,7 +32,9 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def _make_ctx(*, home_root: Path, data_root: Path, unixname: str = "alice") -> MagicMock:
+def _make_ctx(
+    *, home_root: Path, data_root: Path, unixname: str = "alice"
+) -> MagicMock:
     ctx = MagicMock()
 
     async def _identity_resolver(_ctx: Any) -> Identity:
