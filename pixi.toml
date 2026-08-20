@@ -63,6 +63,18 @@ helm lint charts/af-filesystem-mcp -f charts/af-filesystem-mcp/ci/broker-values.
 """, description = "Lint the af-filesystem-mcp Helm chart and smoke-render it" }
 helm-template = { cmd = "helm template smoke charts/af-filesystem-mcp -f charts/af-filesystem-mcp/ci/broker-values.yaml", description = "Render the chart with CI/smoke values" }
 
+[feature.docs.dependencies]
+zensical = "*"
+lychee = "*"
+pydocstyle = "*"
+
+[feature.docs.tasks]
+docs-build = { cmd = "zensical build", description = "Build documentation (static)", inputs = ["src/", "docs/", "zensical.toml"], outputs = ["site"] }
+docs-linkcheck = { cmd = "lychee docs/", description = "Check documentation for broken links" }
+docs-serve = { cmd = "zensical serve", depends-on = ["docs-build"], description = "Build and serve documentation" }
+docs-clean = { cmd = "rm -rf site", description = "Clean documentation build artifacts", inputs = ["site"] }
+check-docstrings = { cmd = "pydocstyle --add-ignore=D104,D105,D107 src/af_filesystem_mcp/", description = "Check docstring style" }
+
 [feature.dev.dependencies]
 pre-commit = "*"
 identify = ">=1.4.20"
@@ -83,6 +95,7 @@ build-check = { cmd = "twine check --strict ./dist/*", depends-on = ["build"], d
 
 [environments]
 dev = ["dev"]
+docs = ["docs"]
 helm = { features = ["helm"], no-default-feature = true }
 py310 = ["test", "py310"]
 py311 = ["test", "py311"]

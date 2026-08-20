@@ -30,6 +30,8 @@ def _format_matches(result: dict[str, Any]) -> str:
 
 
 def register(mcp: MCPServer) -> None:
+    """Register the fs_grep tool."""
+
     @mcp.tool()
     async def fs_grep(
         root: Literal["home", "data"],

@@ -1,11 +1,17 @@
 # af-filesystem-mcp v0.1.1
 
+<!-- --8<-- [start:intro] -->
+
 An MCP server that gives an AF (Analysis Facility) user browse/read access to
 their own files on the AF's shared NFS home (`/home/<unixname>`) and Ceph data
 area (`/data/<unixname>`) — nothing more. Designed to sit behind
 af-mcp-platform's credential broker so an LLM session can look at a user's own
 analysis outputs, condor logs, and scratch files without a human copying paths
 around.
+
+<!-- --8<-- [end:intro] -->
+
+<!-- --8<-- [start:what-it-does] -->
 
 ## What it does
 
@@ -20,6 +26,10 @@ delete, no chmod, no arbitrary command execution, and no full-tree walk
 (directory-size, duplicate-finder). See `CLAUDE.md` for the design rationale and
 phase-2 (write) plan.
 
+<!-- --8<-- [end:what-it-does] -->
+
+<!-- --8<-- [start:security-model] -->
+
 ## Security model
 
 Every filesystem operation for user _alice_ runs in a short-lived helper
@@ -33,6 +43,10 @@ model" and `src/af_filesystem_mcp/paths.py` for the full design rationale, and
 [maniaclab/af-mcp-platform#188](https://github.com/maniaclab/af-mcp-platform/issues/188)
 for the workplan and the (rejected) alternatives this design was chosen over.
 
+<!-- --8<-- [end:security-model] -->
+
+<!-- --8<-- [start:installation] -->
+
 ## Installation
 
 ```bash
@@ -45,12 +59,16 @@ Or with pixi:
 pixi add af-filesystem-mcp
 ```
 
+<!-- --8<-- [end:installation] -->
+
 ## Requirements
 
 - Python 3.10+
 - Linux (the impersonation mechanism is POSIX `setuid`/`setgid`; there is no
   Windows/macOS deployment target — local `stdio` mode runs fine on any OS for
   development, since it never impersonates)
+
+<!-- --8<-- [start:usage] -->
 
 ## Quick start (local development, stdio)
 
@@ -75,6 +93,8 @@ Bearers are broker-issued identity JWTs (`aud=af-filesystem-mcp`) carrying
 `uid`/`gid`/`unixname` POSIX claims (af-mcp-platform's
 `identityProviders[].targetOptions.af-filesystem-mcp.includePosix: true`).
 Requires the `broker` extra: `pip install af-filesystem-mcp[broker]`.
+
+<!-- --8<-- [end:usage] -->
 
 ## Development
 

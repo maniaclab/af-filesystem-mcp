@@ -38,6 +38,8 @@ def _format_listing(result: dict[str, Any], *, root: str, path: str) -> str:
 
 
 def register(mcp: MCPServer) -> None:
+    """Register the fs_list tool."""
+
     @mcp.tool()
     async def fs_list(
         root: Literal["home", "data"],

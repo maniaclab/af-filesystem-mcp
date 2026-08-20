@@ -14,6 +14,8 @@ from af_filesystem_mcp.tools._helpers import (
 
 
 def register(mcp: MCPServer) -> None:
+    """Register the fs_read tool."""
+
     @mcp.tool()
     async def fs_read(
         root: Literal["home", "data"],

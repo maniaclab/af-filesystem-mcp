@@ -43,6 +43,9 @@ ENV/
 .pixi/
 pixi.lock.bak
 
+# mkdocs documentation
+/site
+
 # IDE
 .vscode/
 .idea/

@@ -33,6 +33,8 @@ def _format_stat(result: dict[str, Any]) -> str:
 
 
 def register(mcp: MCPServer) -> None:
+    """Register the fs_stat tool."""
+
     @mcp.tool()
     async def fs_stat(
         root: Literal["home", "data"],
