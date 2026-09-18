@@ -1,4 +1,4 @@
-# af-filesystem-mcp v0.1.3
+# af-filesystem-mcp v0.2.0
 
 <!-- --8<-- [start:intro] -->
 
