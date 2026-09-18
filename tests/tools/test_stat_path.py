@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from mcp.server.mcpserver import MCPServer
@@ -18,11 +18,28 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def fs_stat() -> Callable[..., Awaitable[CallToolResult]]:
+def fs_stat_tool() -> Any:
     mcp = MCPServer("test")
     register(mcp)
-    tools = {tool.name: tool.fn for tool in mcp._tool_manager.list_tools()}
-    return tools["fs_stat"]
+    return next(
+        tool for tool in mcp._tool_manager.list_tools() if tool.name == "fs_stat"
+    )
+
+
+@pytest.fixture
+def fs_stat(fs_stat_tool: Any) -> Callable[..., Awaitable[CallToolResult]]:
+    return fs_stat_tool.fn  # type: ignore[no-any-return]
+
+
+class TestFsStatRegistration:
+    def test_declares_read_only_annotations(self, fs_stat_tool: Any) -> None:
+        assert fs_stat_tool.annotations is not None
+        assert fs_stat_tool.annotations.read_only_hint is True
+        assert fs_stat_tool.annotations.open_world_hint is False
+
+    def test_publishes_an_output_schema(self, fs_stat_tool: Any) -> None:
+        assert fs_stat_tool.output_schema is not None
+        assert "type" in fs_stat_tool.output_schema["properties"]
 
 
 class TestFsStat:
@@ -36,10 +53,15 @@ class TestFsStat:
         home_root, _ = fs_roots
         (home_root / "alice" / "f.txt").write_bytes(b"12345")
 
-        output = tool_text(await fs_stat(root="home", path="f.txt", ctx=mock_ctx))
+        result = await fs_stat(root="home", path="f.txt", ctx=mock_ctx)
+        output = tool_text(result)
 
         assert "type: file" in output
         assert "size: 5B" in output
+        assert result.structured_content is not None
+        assert result.structured_content["root"] == "home"
+        assert result.structured_content["type"] == "file"
+        assert result.structured_content["size"] == 5
 
     async def test_stats_a_symlink_without_following(
         self,
