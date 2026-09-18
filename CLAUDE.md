@@ -138,50 +138,93 @@ Same shape as ami-mcp/rucio-mcp: each `tools/*.py` module exports
 module in `_register_all`. Tools are closures inside `register()` using the
 `@mcp.tool()` decorator.
 
+Every tool returns markdown _and_ structured content:
+`CallToolResult(content=[...], structured_content=...)`, with the return
+annotation spelled `Annotated[CallToolResult, ResultModel]`. This is the escape
+hatch the mcp SDK's `func_metadata()` provides specifically for this case (see
+`mcp/server/mcpserver/utilities/func_metadata.py`): annotating a tool
+`-> ResultModel` directly gets you `outputSchema` + `structuredContent`, but the
+SDK then renders the text block as `pydantic_core.to_json(result, indent=2)`,
+destroying the curated markdown. `Annotated[CallToolResult, ResultModel]`
+publishes `outputSchema` from `ResultModel`, validates `structured_content`
+against it at runtime, and returns the `CallToolResult` — markdown text block
+and all — unchanged.
+
 ```python
 # tools/mymodule.py
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002 (needed at runtime for eval_str signature introspection)
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from pydantic import BaseModel
 
 from af_filesystem_mcp.tools._helpers import append_next_actions, call_fs_op, format_error
 
 
+class FsMyToolResult(BaseModel):
+    """Structured result of fs_my_tool."""
+
+    root: Literal["home", "data"]
+    path: str
+    # ... the rest of the fields call_fs_op's result dict already carries
+
+
 def register(mcp: MCPServer) -> None:
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="My tool",
+            read_only_hint=True,
+            open_world_hint=False,
+        )
+    )
     async def fs_my_tool(
         root: Literal["home", "data"],
         path: str = "",
         *,
         ctx: Context[Any, Any],
-    ) -> str:
+    ) -> Annotated[CallToolResult, FsMyToolResult]:
         """Tool description -- shown to the LLM as the tool's purpose."""
         try:
             result = await call_fs_op(ctx, "my_op", root, path)
         except Exception as exc:  # noqa: BLE001
             return format_error(exc, hints=["..."])
-        return append_next_actions(str(result), ["..."])
+        text = append_next_actions(str(result), ["..."])
+        payload = FsMyToolResult(root=root, **result)
+        return CallToolResult(
+            content=[TextContent(type="text", text=text)],
+            structured_content=payload.model_dump(mode="json"),
+        )
 ```
 
 Key conventions:
 
 - Tool names are prefixed with `fs_` to avoid collisions.
 - `ctx` is keyword-only (after `*`).
-- `Context`/`MCPServer` must be imported as **real, non-`TYPE_CHECKING`**
-  imports (with a `# noqa: TC002` to satisfy ruff's type-checking-import lint) —
+- `Context`/`MCPServer`/`CallToolResult`/`TextContent`/`ToolAnnotations` and
+  every result model used in a return annotation must be imported as **real,
+  non-`TYPE_CHECKING`** imports (with a `# noqa: TC002` on the
+  `mcp.server.mcpserver` import to satisfy ruff's type-checking-import lint) —
   the mcp SDK's `func_metadata()` calls
-  `inspect.signature(func, eval_str=True)`, which needs `Context` to actually
-  resolve in the function's module globals at _runtime_, not just for static
-  type checking. Getting this wrong raises
+  `inspect.signature(func, eval_str=True)`, which needs every name in the
+  signature to actually resolve in the function's module globals at _runtime_,
+  not just for static type checking. Getting this wrong raises
   `InvalidSignature: Unable to evaluate type annotations` the moment the tool is
   registered.
-- Errors are returned via `format_error(exc, hints=[...])` — never raised, never
-  a bare `f"Error: {exc}"` string.
+- All four tools are read-only and confined to the caller's own two AF roots, so
+  every `ToolAnnotations` today is `read_only_hint=True, open_world_hint=False`.
+  `destructive_hint`/`idempotent_hint` stay unset — the spec says they're only
+  meaningful when `read_only_hint` is false.
+- Errors are returned via `format_error(exc, hints=[...])`, which itself returns
+  a `CallToolResult(is_error=True)` — never raised, never a bare
+  `f"Error: {exc}"` string, and never a plain error `CallToolResult` built by
+  hand at a tool's own call site.
 - `except Exception as exc:` lines carry `# noqa: BLE001` inline;
   `broad-exception-caught` is disabled globally in pylint (`pyproject.toml`).
-- Use `append_next_actions(output, [...])` to suggest follow-up tool calls.
+- Use `append_next_actions(output, [...])` to suggest follow-up tool calls, on
+  the markdown text going into the `TextContent` block -- never on
+  `structured_content`.
 - If adding a new _operation_ (not just a new tool wrapping existing ops), add
   the pure function to `helper/ops.py`, wire it into `helper/__main__ .py`'s
   `_OPS` dict, and give it its own `PathEscapeError`/`OSError` handling
