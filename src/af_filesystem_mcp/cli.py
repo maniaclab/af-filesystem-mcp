@@ -5,7 +5,10 @@ from __future__ import annotations
 import argparse
 import os
 
+from af_filesystem_mcp.budgets import Budgets
 from af_filesystem_mcp.server import serve
+
+_DEFAULT_BUDGETS = Budgets()
 
 
 def main() -> None:
@@ -115,6 +118,60 @@ def main() -> None:
         help="Per-user concurrency cap on in-flight filesystem calls (default: 4)",
     )
     serve_parser.add_argument(
+        "--max-read-bytes",
+        type=int,
+        default=int(
+            os.environ.get(
+                "AF_FILESYSTEM_MCP_MAX_READ_BYTES", str(_DEFAULT_BUDGETS.read_max_bytes)
+            )
+        ),
+        help=(
+            "fs_read's per-call byte window (default: "
+            f"{_DEFAULT_BUDGETS.read_max_bytes})"
+        ),
+    )
+    serve_parser.add_argument(
+        "--max-read-file-size",
+        type=int,
+        default=int(
+            os.environ.get(
+                "AF_FILESYSTEM_MCP_MAX_READ_FILE_SIZE",
+                str(_DEFAULT_BUDGETS.read_max_file_size),
+            )
+        ),
+        help=(
+            "Largest file fs_read will read in one bare whole-file request "
+            f"before refusing (default: {_DEFAULT_BUDGETS.read_max_file_size})"
+        ),
+    )
+    serve_parser.add_argument(
+        "--max-grep-output-bytes",
+        type=int,
+        default=int(
+            os.environ.get(
+                "AF_FILESYSTEM_MCP_MAX_GREP_OUTPUT_BYTES",
+                str(_DEFAULT_BUDGETS.grep_max_output_bytes),
+            )
+        ),
+        help=(
+            "fs_grep's total snippet-bytes budget per call (default: "
+            f"{_DEFAULT_BUDGETS.grep_max_output_bytes})"
+        ),
+    )
+    serve_parser.add_argument(
+        "--max-line-chars",
+        type=int,
+        default=int(
+            os.environ.get(
+                "AF_FILESYSTEM_MCP_MAX_LINE_CHARS", str(_DEFAULT_BUDGETS.max_line_chars)
+            )
+        ),
+        help=(
+            "fs_grep's per-match line-text character cap (default: "
+            f"{_DEFAULT_BUDGETS.max_line_chars})"
+        ),
+    )
+    serve_parser.add_argument(
         "--forwarded-allow-ips",
         default="127.0.0.1",
         help="IPs trusted for X-Forwarded-* headers (default: 127.0.0.1)",
@@ -141,6 +198,10 @@ def main() -> None:
             broker_audience=args.broker_audience,
             timeout_seconds=args.timeout_seconds,
             max_concurrent_calls_per_user=args.max_concurrent_calls_per_user,
+            max_read_bytes=args.max_read_bytes,
+            max_read_file_size=args.max_read_file_size,
+            max_grep_output_bytes=args.max_grep_output_bytes,
+            max_line_chars=args.max_line_chars,
             forwarded_allow_ips=args.forwarded_allow_ips,
             log_level=args.log_level,
         )

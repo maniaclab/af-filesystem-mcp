@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from mcp.types import CallToolResult, TextContent
 
+from af_filesystem_mcp.budgets import Budgets
 from af_filesystem_mcp.impersonate import (
     HelperError,
     HelperTimeoutError,
@@ -33,6 +34,22 @@ RootName = Literal["home", "data"]
 
 DEFAULT_TIMEOUT_SECONDS = 10.0
 DEFAULT_MAX_CONCURRENT_CALLS_PER_USER = 4
+
+#: helper-op kwarg -> Budgets field, per op. Lets call_fs_op inject the
+#: server-configured per-call budgets into the helper payload without each
+#: tool module reaching into the lifespan context itself -- helper.ops runs
+#: in a subprocess, so these can't just be read there the way timeout_seconds
+#: is read in-process. Injected via setdefault, so an explicit caller-supplied
+#: kwarg (as in a direct call_fs_op test, or a future tool parameter) always
+#: wins; the ops-layer MAX_* clamps remain the actual enforcement regardless
+#: of what a Budgets value requests.
+_OP_BUDGETS: dict[str, dict[str, str]] = {
+    "read": {"max_bytes": "read_max_bytes", "max_file_size": "read_max_file_size"},
+    "grep": {
+        "max_output_bytes": "grep_max_output_bytes",
+        "max_line_chars": "max_line_chars",
+    },
+}
 
 #: Friendly, LLM-facing context for each tag af_filesystem_mcp.helper.__main__
 #: writes to stderr (see that module's docstring for the tag contract).
@@ -111,7 +128,10 @@ async def call_fs_op(
     "data"); *path* is relative to it. Extra *kwargs* are forwarded
     verbatim to the corresponding ``af_filesystem_mcp.helper.ops`` function
     as its JSON payload (e.g. ``offset``/``limit`` for list, ``pattern``
-    for grep).
+    for grep) -- for ``"read"``/``"grep"``, any budget field *op* accepts
+    (see ``_OP_BUDGETS``) not already present in *kwargs* is filled in from
+    the lifespan's configured ``Budgets`` (or ``Budgets()``'s defaults, if
+    the lifespan carries none).
 
     Raises:
         ValueError: *root* is neither ``"home"`` nor ``"data"``.
@@ -124,6 +144,10 @@ async def call_fs_op(
     lifespan = ctx.request_context.lifespan_context
     semaphore = _get_semaphore(lifespan, identity.unixname)
     timeout = lifespan.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)
+    budgets: Budgets = lifespan.get("budgets", Budgets())
+
+    for kwarg_name, budget_field in _OP_BUDGETS.get(op, {}).items():
+        kwargs.setdefault(kwarg_name, getattr(budgets, budget_field))
 
     payload = {"root": str(chosen_root), "relative": path, **kwargs}
     async with semaphore:

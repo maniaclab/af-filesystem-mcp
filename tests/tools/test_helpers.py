@@ -19,6 +19,7 @@ import pytest
 from mcp.types import CallToolResult, TextContent
 
 from af_filesystem_mcp.auth.broker import IdentityError
+from af_filesystem_mcp.budgets import Budgets
 from af_filesystem_mcp.identity import Identity
 from af_filesystem_mcp.impersonate import HelperError, HelperTimeoutError
 from af_filesystem_mcp.roots import RootsConfig
@@ -34,17 +35,24 @@ if TYPE_CHECKING:
 
 
 def _make_ctx(
-    *, home_root: Path, data_root: Path, unixname: str = "alice"
+    *,
+    home_root: Path,
+    data_root: Path,
+    unixname: str = "alice",
+    budgets: Budgets | None = None,
 ) -> MagicMock:
     ctx = MagicMock()
 
     async def _identity_resolver(_ctx: Any) -> Identity:
         return Identity(uid=1234, gid=5678, unixname=unixname)
 
-    ctx.request_context.lifespan_context = {
+    lifespan_context: dict[str, Any] = {
         "identity_resolver": _identity_resolver,
         "roots_config": RootsConfig(home_root=home_root, data_root=data_root),
     }
+    if budgets is not None:
+        lifespan_context["budgets"] = budgets
+    ctx.request_context.lifespan_context = lifespan_context
     return ctx
 
 
@@ -98,6 +106,57 @@ class TestCallFsOp:
 
         with pytest.raises(HelperError, match="PATH_ESCAPE"):
             await call_fs_op(ctx, "list", "home", "../")
+
+    async def test_read_op_uses_the_configured_read_budget(
+        self, tmp_path: Path
+    ) -> None:
+        home_root = tmp_path / "home"
+        (home_root / "alice").mkdir(parents=True)
+        (home_root / "alice" / "f.txt").write_bytes(b"x" * 100)
+        ctx = _make_ctx(
+            home_root=home_root,
+            data_root=tmp_path / "data",
+            budgets=Budgets(read_max_bytes=10),
+        )
+
+        result = await call_fs_op(ctx, "read", "home", "f.txt")
+
+        assert len(result["content"]) == 10
+        assert result["truncated"] is True
+
+    async def test_explicit_kwarg_overrides_the_configured_budget(
+        self, tmp_path: Path
+    ) -> None:
+        home_root = tmp_path / "home"
+        (home_root / "alice").mkdir(parents=True)
+        (home_root / "alice" / "f.txt").write_bytes(b"x" * 100)
+        ctx = _make_ctx(
+            home_root=home_root,
+            data_root=tmp_path / "data",
+            budgets=Budgets(read_max_bytes=10),
+        )
+
+        result = await call_fs_op(ctx, "read", "home", "f.txt", max_bytes=20)
+
+        assert len(result["content"]) == 20
+
+    async def test_grep_op_uses_the_configured_line_char_budget(
+        self, tmp_path: Path
+    ) -> None:
+        home_root = tmp_path / "home"
+        (home_root / "alice").mkdir(parents=True)
+        (home_root / "alice" / "f.txt").write_text("needle" + "x" * 100 + "\n")
+        ctx = _make_ctx(
+            home_root=home_root,
+            data_root=tmp_path / "data",
+            budgets=Budgets(max_line_chars=10),
+        )
+
+        result = await call_fs_op(ctx, "grep", "home", "", pattern="needle")
+
+        match = result["files"][0]["matches"][0]
+        assert len(match["line"]) == 10
+        assert match["truncated"] is True
 
     async def test_per_user_concurrency_semaphore_is_reused_across_calls(
         self, tmp_path: Path

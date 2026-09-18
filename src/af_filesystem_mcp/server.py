@@ -38,6 +38,7 @@ from af_filesystem_mcp.auth.broker import (
 )
 from af_filesystem_mcp.auth.broker import resolve_identity as broker_resolve_identity
 from af_filesystem_mcp.auth.local import local_identity
+from af_filesystem_mcp.budgets import Budgets
 from af_filesystem_mcp.roots import RootsConfig
 from af_filesystem_mcp.tools import grep_files, list_dir, read_file, stat_path
 
@@ -59,6 +60,12 @@ _INSTRUCTIONS = (
     "fs_grep (search file contents under a directory, recursive, capped)."
 )
 
+#: Module-level singleton, not `Budgets()` inline in each function's default
+#: argument list below (ruff B008: a call in a default is evaluated once at
+#: *def* time anyway, so it is misleading to write it as if per-call -- this
+#: makes the single evaluation explicit).
+_DEFAULT_BUDGETS = Budgets()
+
 
 def _register_all(mcp: MCPServer) -> None:
     """Register every tool module on *mcp*."""
@@ -66,7 +73,9 @@ def _register_all(mcp: MCPServer) -> None:
         _module.register(mcp)
 
 
-def _make_stdio_mcp(*, data_root: Path) -> MCPServer:
+def _make_stdio_mcp(
+    *, data_root: Path, budgets: Budgets = _DEFAULT_BUDGETS
+) -> MCPServer:
     """Build the stdio-transport server: single caller, the process's own identity."""
 
     async def _identity_resolver(_ctx: Any) -> Any:
@@ -77,6 +86,7 @@ def _make_stdio_mcp(*, data_root: Path) -> MCPServer:
         yield {
             "identity_resolver": _identity_resolver,
             "roots_config": RootsConfig(home_root=Path("/home"), data_root=data_root),
+            "budgets": budgets,
         }
 
     mcp = MCPServer("af-filesystem-mcp", lifespan=_lifespan, instructions=_INSTRUCTIONS)
@@ -95,6 +105,7 @@ def _make_broker_app(
     max_concurrent_calls_per_user: int,
     resource_url: str,
     host: str,
+    budgets: Budgets = _DEFAULT_BUDGETS,
 ) -> Starlette:
     """Build the ASGI app for HTTP transport behind the AF credential broker."""
     verifier = make_broker_token_verifier(jwks_url, issuer, audience)
@@ -110,6 +121,7 @@ def _make_broker_app(
             "roots_config": RootsConfig(home_root=home_root, data_root=data_root),
             "timeout_seconds": timeout_seconds,
             "max_concurrent_calls_per_user": max_concurrent_calls_per_user,
+            "budgets": budgets,
         }
 
     mcp = MCPServer(
@@ -160,12 +172,25 @@ def serve(
     broker_audience: str = "af-filesystem-mcp",
     timeout_seconds: float = 10.0,
     max_concurrent_calls_per_user: int = 4,
+    max_read_bytes: int = _DEFAULT_BUDGETS.read_max_bytes,
+    max_read_file_size: int = _DEFAULT_BUDGETS.read_max_file_size,
+    max_grep_output_bytes: int = _DEFAULT_BUDGETS.grep_max_output_bytes,
+    max_line_chars: int = _DEFAULT_BUDGETS.max_line_chars,
     forwarded_allow_ips: str = "127.0.0.1",
     log_level: str = "info",
 ) -> None:
     """Start the MCP server over the selected transport."""
+    budgets = Budgets(
+        read_max_bytes=max_read_bytes,
+        read_max_file_size=max_read_file_size,
+        grep_max_output_bytes=max_grep_output_bytes,
+        max_line_chars=max_line_chars,
+    )
+
     if transport == "stdio":
-        _make_stdio_mcp(data_root=Path(data_root)).run(transport="stdio")
+        _make_stdio_mcp(data_root=Path(data_root), budgets=budgets).run(
+            transport="stdio"
+        )
         return
 
     if not broker_url:
@@ -186,6 +211,7 @@ def serve(
         max_concurrent_calls_per_user=max_concurrent_calls_per_user,
         resource_url=resource_url or f"http://{host}:{port}",
         host=host,
+        budgets=budgets,
     )
 
     _configure_logging(log_level)
