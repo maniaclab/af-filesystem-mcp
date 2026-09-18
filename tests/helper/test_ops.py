@@ -193,6 +193,52 @@ class TestReadFileLineModes:
         result = ops.read_file(root, "f.txt", mode="lines", start_line=8, num_lines=10)
         assert result["content"] == "line8\nline9\n"
 
+    def test_head_truncates_at_max_bytes(self, root: Path) -> None:
+        result = ops.read_file(root, "f.txt", mode="head", num_lines=100, max_bytes=12)
+        assert result["content"] == "line0\nline1\n"
+        assert result["truncated"] is True
+
+
+class TestReadFileTailOfLargeFile:
+    """issue #4: tail must return the file's real tail, not the tail of the
+    first max_bytes window -- these use a file much larger than max_bytes
+    so the pre-fix bug (returning an arbitrary middle-of-file slice) would
+    fail every assertion here.
+    """
+
+    @pytest.fixture
+    def big_file(self, root: Path) -> list[str]:
+        lines = [f"line{i:04d}\n" for i in range(1000)]
+        (root / "big.txt").write_text("".join(lines))
+        return lines
+
+    def test_tail_returns_the_files_actual_last_lines(
+        self, root: Path, big_file: list[str]
+    ) -> None:
+        result = ops.read_file(root, "big.txt", mode="tail", num_lines=3, max_bytes=50)
+        assert result["content"] == "".join(big_file[-3:])
+        assert result["truncated"] is True
+
+    def test_tail_of_a_file_that_fits_within_max_bytes_is_not_truncated(
+        self, root: Path, big_file: list[str]
+    ) -> None:
+        result = ops.read_file(
+            root, "big.txt", mode="tail", num_lines=3, max_bytes=len(big_file) * 9
+        )
+        assert result["content"] == "".join(big_file[-3:])
+        assert result["truncated"] is False
+
+    def test_lines_mode_reaches_a_range_past_the_first_max_bytes_window(
+        self, root: Path, big_file: list[str]
+    ) -> None:
+        # Before the fix, `lines` only ever looked inside the first
+        # `max_bytes` bytes of the file, so a start_line beyond that
+        # window silently returned nothing.
+        result = ops.read_file(
+            root, "big.txt", mode="lines", start_line=900, num_lines=3, max_bytes=50
+        )
+        assert result["content"] == "".join(big_file[900:903])
+
 
 class TestGrepFiles:
     def test_finds_matches_in_a_single_file(self, root: Path) -> None:

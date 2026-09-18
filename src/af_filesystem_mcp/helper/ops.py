@@ -30,7 +30,7 @@ import errno
 import os
 import stat as stat_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import IO, TYPE_CHECKING, Any, Literal, NamedTuple
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -218,6 +218,69 @@ def stat_path(root: Path, relative: str) -> dict[str, Any]:
     return entry | {"path": relative}
 
 
+def _read_head(fh: IO[bytes], *, num_lines: int, max_bytes: int) -> tuple[bytes, bool]:
+    """Return ``(content, truncated)`` for ``mode="head"``: the first *num_lines* lines, capped at *max_bytes*."""
+    raw = fh.read(max_bytes + 1)
+    truncated = len(raw) > max_bytes
+    raw = raw[:max_bytes]
+    lines = raw.splitlines(keepends=True)
+    if truncated and lines and not lines[-1].endswith(b"\n"):
+        # The byte cap landed mid-line; drop the partial trailing
+        # fragment rather than return a line cut off mid-content.
+        lines = lines[:-1]
+    return b"".join(lines[:num_lines]), truncated
+
+
+def _read_tail(
+    fh: IO[bytes], *, size: int, num_lines: int, max_bytes: int
+) -> tuple[bytes, bool]:
+    """Return ``(content, truncated)`` for ``mode="tail"``: the file's real last *num_lines* lines.
+
+    Issue #4: seeks to the last *max_bytes* bytes of the file rather than
+    reading from the start, so tailing a file larger than *max_bytes*
+    returns the file's actual tail, not lines from an arbitrary earlier
+    window (the previous bug: the first *max_bytes* were read, then the
+    last *num_lines* of *that* window were taken).
+    """
+    seek_pos = max(0, size - max_bytes)
+    fh.seek(seek_pos)
+    raw = fh.read()
+    lines = raw.splitlines(keepends=True)
+    if seek_pos > 0 and lines:
+        # Landed mid-line (true unless seek_pos happens to fall exactly on
+        # a line boundary) -- drop the partial leading fragment so a
+        # truncated first line is never mistaken for a real one.
+        lines = lines[1:]
+    return b"".join(lines[-num_lines:]), seek_pos > 0
+
+
+def _read_lines(
+    fh: IO[bytes], *, start_line: int, num_lines: int, max_bytes: int
+) -> tuple[bytes, bool]:
+    """Return ``(content, truncated)`` for ``mode="lines"``: *num_lines* lines starting at *start_line*.
+
+    Streams from the start of the file rather than slicing a fixed front
+    window, so a *start_line* beyond the first *max_bytes* bytes is still
+    reachable (issue #4) -- the cost of reaching it is a forward scan of
+    the skipped lines, bounded by the helper subprocess's overall
+    wall-clock timeout rather than by *max_bytes*.
+    """
+    selected: list[bytes] = []
+    total_bytes = 0
+    truncated = False
+    for index, line in enumerate(fh):
+        if index < start_line:
+            continue
+        if len(selected) >= num_lines:
+            break
+        total_bytes += len(line)
+        if total_bytes > max_bytes:
+            truncated = True
+            break
+        selected.append(line)
+    return b"".join(selected), truncated
+
+
 def read_file(
     root: Path,
     relative: str,
@@ -240,9 +303,14 @@ def read_file(
     ``mode="bytes"``: returns bytes ``[offset, offset+length)``, capped at
     *max_bytes* (itself capped at ``MAX_READ_BYTES_LIMIT``).
 
-    ``mode="head"``/``"tail"``: the first/last *num_lines* lines.
+    ``mode="head"``/``"tail"``: the first/last *num_lines* lines. ``tail``
+    seeks to the file's real last *max_bytes* bytes rather than reading
+    from the start (issue #4) -- tailing a file larger than *max_bytes*
+    returns the file's actual tail, not lines from an arbitrary earlier
+    window.
 
-    ``mode="lines"``: *num_lines* lines starting at *start_line* (0-based).
+    ``mode="lines"``: *num_lines* lines starting at *start_line* (0-based),
+    reachable anywhere in the file (not just the first *max_bytes*).
 
     Content is decoded as UTF-8 with invalid sequences replaced (never
     raises on binary content) and returned as a plain ``str`` -- the MCP
@@ -278,18 +346,21 @@ def read_file(
             content = raw[:requested]
         else:
             num_lines = min(max(num_lines, 1), MAX_NUM_LINES)
-            all_lines = fh.read(max_bytes + 1).splitlines(keepends=True)
-            truncated = len(b"".join(all_lines)) > max_bytes
             if mode == "head":
-                selected = all_lines[:num_lines]
+                content, truncated = _read_head(
+                    fh, num_lines=num_lines, max_bytes=max_bytes
+                )
             elif mode == "tail":
-                selected = all_lines[-num_lines:]
+                content, truncated = _read_tail(
+                    fh, size=st.st_size, num_lines=num_lines, max_bytes=max_bytes
+                )
             elif mode == "lines":
-                selected = all_lines[start_line : start_line + num_lines]
+                content, truncated = _read_lines(
+                    fh, start_line=start_line, num_lines=num_lines, max_bytes=max_bytes
+                )
             else:  # pragma: no cover - guarded by the tool layer's enum
                 msg = f"unknown read mode: {mode!r}"
                 raise ValueError(msg)
-            content = b"".join(selected)
 
     return {
         "path": relative,
