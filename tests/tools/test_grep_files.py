@@ -39,7 +39,7 @@ class TestFsGrepRegistration:
 
     def test_publishes_an_output_schema(self, fs_grep_tool: Any) -> None:
         assert fs_grep_tool.output_schema is not None
-        assert "matches" in fs_grep_tool.output_schema["properties"]
+        assert "files" in fs_grep_tool.output_schema["properties"]
 
 
 class TestFsGrep:
@@ -58,15 +58,20 @@ class TestFsGrep:
         result = await fs_grep(root="home", pattern="ERROR", path="", ctx=mock_ctx)
         output = tool_text(result)
 
-        assert "log.txt:2: ERROR found" in output
+        assert "log.txt (1 matches)" in output
+        assert "2: ERROR found" in output
         assert result.structured_content is not None
         assert result.structured_content["root"] == "home"
         assert result.structured_content["pattern"] == "ERROR"
-        assert result.structured_content["matches"][0] == {
-            "path": "log.txt",
-            "line_number": 2,
-            "line": "ERROR found",
-        }
+        assert result.structured_content["files"] == [
+            {
+                "path": "log.txt",
+                "match_count": 1,
+                "matches": [
+                    {"line_number": 2, "line": "ERROR found", "truncated": False}
+                ],
+            }
+        ]
 
     async def test_no_matches_reports_zero(
         self,

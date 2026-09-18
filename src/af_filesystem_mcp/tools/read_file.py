@@ -22,6 +22,7 @@ class FsReadResult(BaseModel):
     path: str
     content: str
     truncated: bool
+    size: int
 
 
 def register(mcp: MCPServer) -> None:
@@ -51,16 +52,24 @@ def register(mcp: MCPServer) -> None:
         `path` is relative to it. `mode` controls how much of the file
         comes back:
 
-        - "bytes" (default): bytes `[offset, offset+length)`, capped at 1
-          MiB per call (8 MiB hard limit even if you ask for more).
-        - "head"/"tail": the first/last `num_lines` lines.
-        - "lines": `num_lines` lines starting at `start_line` (0-based).
+        - "bytes" (default): bytes `[offset, offset+length)`, capped at a
+          server-configured window (64 KiB by default, 256 KiB hard limit
+          even if you ask for more). A bare call with no `offset`/`length`
+          on a file bigger than the server's whole-file-read limit is
+          refused with an error naming the real size -- use "tail"/"head"/
+          "lines", or "bytes" with an explicit `offset`/`length`, instead.
+        - "head"/"tail": the first/last `num_lines` lines. "tail" is the
+          file's real tail, not the tail of whatever fit in one window.
+        - "lines": `num_lines` lines starting at `start_line` (0-based),
+          reachable anywhere in the file.
 
-        Content is decoded as UTF-8 with invalid bytes replaced -- this is
-        a text-reading tool, not a binary dump. A symlink is never
-        followed: reading one fails with a clear error rather than
-        silently reading whatever it points at (see fs_stat to see a
-        symlink's target).
+        The result always reports the file's real `size` alongside
+        `content`, so you can tell a small page of a huge file apart from
+        "this is the whole file". Content is decoded as UTF-8 with invalid
+        bytes replaced -- this is a text-reading tool, not a binary dump. A
+        symlink is never followed: reading one fails with a clear error
+        rather than silently reading whatever it points at (see fs_stat to
+        see a symlink's target).
         """
         try:
             result = await call_fs_op(
@@ -83,7 +92,11 @@ def register(mcp: MCPServer) -> None:
             )
         output = result["content"]
         if result["truncated"]:
-            output += "\n\n[... truncated ...]"
+            shown_bytes = len(result["content"].encode("utf-8"))
+            output += (
+                f"\n\n[... truncated: showing {shown_bytes} of "
+                f"{result['size']} bytes ...]"
+            )
         text = append_next_actions(
             output,
             [

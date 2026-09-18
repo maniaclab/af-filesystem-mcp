@@ -166,6 +166,50 @@ class TestHelperErrorHandling:
 
         assert fake_proc.killed is True
 
+    async def test_oversized_stdout_raises_helper_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # issue #5, defense-in-depth: even if an ops.py budget is somehow
+        # bypassed (a bug, or a future op that forgets its budget), a
+        # helper that returns an implausibly large amount of stdout must
+        # not be handed straight to the LLM.
+        oversized = b"x" * (impersonate.MAX_HELPER_STDOUT_BYTES + 1)
+
+        async def fake_create_subprocess_exec(
+            *_argv: str, **_kwargs: Any
+        ) -> _FakeProcess:
+            return _FakeProcess(stdout=oversized)
+
+        monkeypatch.setattr(impersonate.os, "geteuid", lambda: 0)
+        monkeypatch.setattr(
+            impersonate.asyncio,
+            "create_subprocess_exec",
+            fake_create_subprocess_exec,
+        )
+
+        with pytest.raises(HelperError, match="stdout"):
+            await run_helper(["read", "{}"], uid=1, gid=1, timeout=5.0)
+
+    async def test_stdout_at_the_limit_is_not_rejected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        at_limit = b"x" * impersonate.MAX_HELPER_STDOUT_BYTES
+
+        async def fake_create_subprocess_exec(
+            *_argv: str, **_kwargs: Any
+        ) -> _FakeProcess:
+            return _FakeProcess(stdout=at_limit)
+
+        monkeypatch.setattr(impersonate.os, "geteuid", lambda: 0)
+        monkeypatch.setattr(
+            impersonate.asyncio,
+            "create_subprocess_exec",
+            fake_create_subprocess_exec,
+        )
+
+        result = await run_helper(["read", "{}"], uid=1, gid=1, timeout=5.0)
+        assert result == at_limit
+
     async def test_malformed_json_output_raises_helper_error(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

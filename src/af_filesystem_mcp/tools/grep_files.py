@@ -16,37 +16,61 @@ from af_filesystem_mcp.tools._helpers import (
 
 
 class FsGrepMatch(BaseModel):
-    """One matching line, as reported by ``fs_grep``."""
+    """One matching line within a file, as reported by ``fs_grep``.
 
-    path: str
+    ``line`` is truncated to the server's per-line character budget (see
+    ``truncated``) -- a single long line (e.g. a minified JS/JSON file)
+    would otherwise make one "match" arbitrarily large.
+    """
+
     line_number: int
     line: str
+    truncated: bool
+
+
+class FsGrepFileMatches(BaseModel):
+    """All matches found within one file, as reported by ``fs_grep``."""
+
+    path: str
+    match_count: int
+    matches: list[FsGrepMatch]
 
 
 class FsGrepResult(BaseModel):
-    """Structured result of ``fs_grep``."""
+    """Structured result of ``fs_grep``, grouped by file.
+
+    Grouped rather than a flat per-match list (each carrying its own
+    ``path``) so the common case -- several matches in the same file --
+    doesn't repeat that file's path once per match, and a caller can often
+    skip a follow-up ``fs_read`` entirely.
+    """
 
     root: Literal["home", "data"]
     path: str
     pattern: str
-    matches: list[FsGrepMatch]
+    files: list[FsGrepFileMatches]
     files_scanned: int
+    total_matches: int
     truncated: bool
 
 
 def _format_matches(result: dict[str, Any]) -> str:
     header = (
         f"{result['files_scanned']} file(s) scanned, "
-        f"{len(result['matches'])} match(es) for {result['pattern']!r}"
+        f"{result['total_matches']} match(es) for {result['pattern']!r}"
     )
-    if not result["matches"]:
+    if not result["files"]:
         return header
     lines = [header]
-    lines.extend(
-        f"  {m['path']}:{m['line_number']}: {m['line']}" for m in result["matches"]
-    )
+    for file_matches in result["files"]:
+        lines.append(
+            f"  {file_matches['path']} ({file_matches['match_count']} matches)"
+        )
+        lines.extend(
+            f"    {m['line_number']}: {m['line']}" for m in file_matches["matches"]
+        )
     if result["truncated"]:
-        lines.append("  ... truncated (hit a files-scanned or matches cap)")
+        lines.append("  ... truncated (hit a files-scanned/matches/output-size cap)")
     return "\n".join(lines)
 
 
@@ -78,7 +102,9 @@ def register(mcp: MCPServer) -> None:
         500) and `max_matches` total matches (hard limit 200) -- if either
         cap is hit the result says so; narrow `path` and retry rather than
         raising the caps for a broad search. Never descends into or reads
-        through a symlink; binary files are skipped.
+        through a symlink; binary files are skipped. Results are grouped
+        by file, and each matched line is truncated to a server-configured
+        character budget (long lines are cut short, not the match count).
         """
         try:
             result = await call_fs_op(
