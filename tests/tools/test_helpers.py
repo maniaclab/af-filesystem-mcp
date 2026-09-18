@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from unittest.mock import MagicMock
 
 import pytest
+from mcp.types import CallToolResult, TextContent
 
 from af_filesystem_mcp.auth.broker import IdentityError
 from af_filesystem_mcp.identity import Identity
@@ -112,30 +113,43 @@ class TestCallFsOp:
         assert list(semaphores) == ["alice"]
 
 
+def _error_text(result: CallToolResult) -> str:
+    """Extract the sole text block's content from an is_error CallToolResult."""
+    block = result.content[0]
+    assert isinstance(block, TextContent)
+    return block.text
+
+
 class TestFormatError:
+    def test_returns_an_is_error_call_tool_result(self) -> None:
+        result = format_error(ValueError("bad"))
+        assert isinstance(result, CallToolResult)
+        assert result.is_error is True
+        assert result.structured_content is None
+
     def test_helper_error_path_escape_gets_a_friendly_prefix(self) -> None:
-        message = format_error(HelperError("PATH_ESCAPE: 'x' escapes root"))
-        assert "confined" in message.lower()
+        result = format_error(HelperError("PATH_ESCAPE: 'x' escapes root"))
+        assert "confined" in _error_text(result).lower()
 
     def test_helper_error_not_found_gets_a_friendly_prefix(self) -> None:
-        message = format_error(HelperError("NOT_FOUND: no such file"))
-        assert "no such" in message.lower()
+        result = format_error(HelperError("NOT_FOUND: no such file"))
+        assert "no such" in _error_text(result).lower()
 
     def test_helper_error_unknown_tag_falls_back_to_raw_message(self) -> None:
-        message = format_error(HelperError("SOMETHING_WEIRD: detail"))
-        assert "SOMETHING_WEIRD" in message
+        result = format_error(HelperError("SOMETHING_WEIRD: detail"))
+        assert "SOMETHING_WEIRD" in _error_text(result)
 
     def test_helper_timeout_error_is_recognizable(self) -> None:
-        message = format_error(HelperTimeoutError("timed out after 10.0s"))
-        assert "time" in message.lower()
+        result = format_error(HelperTimeoutError("timed out after 10.0s"))
+        assert "time" in _error_text(result).lower()
 
     def test_identity_error_message_passthrough(self) -> None:
-        message = format_error(IdentityError("no POSIX claims"))
-        assert "no POSIX claims" in message
+        result = format_error(IdentityError("no POSIX claims"))
+        assert "no POSIX claims" in _error_text(result)
 
     def test_hints_are_appended(self) -> None:
-        message = format_error(ValueError("bad"), hints=["Try again."])
-        assert "Try again." in message
+        result = format_error(ValueError("bad"), hints=["Try again."])
+        assert "Try again." in _error_text(result)
 
 
 def test_append_next_actions_appends_bulleted_list() -> None:

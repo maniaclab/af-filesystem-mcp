@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002
+from mcp.types import CallToolResult, TextContent
 
 from af_filesystem_mcp.tools._helpers import (
     append_next_actions,
@@ -41,7 +42,7 @@ def register(mcp: MCPServer) -> None:
         path: str = "",
         *,
         ctx: Context[Any, Any],
-    ) -> str:
+    ) -> CallToolResult:
         """Get metadata (type, size, mtime, permissions) for one path.
 
         `root` selects which of your two confined areas to look in: "home"
@@ -56,10 +57,11 @@ def register(mcp: MCPServer) -> None:
                 exc, hints=["Use `fs_list` on the parent directory to check the name."]
             )
         output = _format_stat(result)
-        return append_next_actions(
+        text = append_next_actions(
             output,
             [
                 "Use `fs_read` if this is a file you want the contents of.",
                 "Use `fs_list` if this is a directory you want to browse.",
             ],
         )
+        return CallToolResult(content=[TextContent(type="text", text=text)])

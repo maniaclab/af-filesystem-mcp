@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002
+from mcp.types import CallToolResult, TextContent
 
 from af_filesystem_mcp.tools._helpers import (
     append_next_actions,
@@ -27,7 +28,7 @@ def register(mcp: MCPServer) -> None:
         num_lines: int = 200,
         *,
         ctx: Context[Any, Any],
-    ) -> str:
+    ) -> CallToolResult:
         """Read a file under your own AF home or data area.
 
         `root` selects "home" (`/home/<you>`) or "data" (`/data/<you>`);
@@ -67,9 +68,10 @@ def register(mcp: MCPServer) -> None:
         output = result["content"]
         if result["truncated"]:
             output += "\n\n[... truncated ...]"
-        return append_next_actions(
+        text = append_next_actions(
             output,
             [
                 "Use `fs_read` again with a different `offset`/`start_line` to see more.",
             ],
         )
+        return CallToolResult(content=[TextContent(type="text", text=text)])

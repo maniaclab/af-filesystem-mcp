@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002
+from mcp.types import CallToolResult, TextContent
 
 from af_filesystem_mcp.tools._helpers import (
     append_next_actions,
@@ -41,7 +42,7 @@ def register(mcp: MCPServer) -> None:
         max_matches: int = 200,
         *,
         ctx: Context[Any, Any],
-    ) -> str:
+    ) -> CallToolResult:
         """Search for a literal substring across files under a directory (recursive).
 
         `root` selects "home" (`/home/<you>`) or "data" (`/data/<you>`);
@@ -71,10 +72,11 @@ def register(mcp: MCPServer) -> None:
                 ],
             )
         output = _format_matches(result)
-        return append_next_actions(
+        text = append_next_actions(
             output,
             [
                 "Use `fs_read` to see more context around a match.",
                 "Narrow `path` to a subdirectory if the result was truncated.",
             ],
         )
+        return CallToolResult(content=[TextContent(type="text", text=text)])

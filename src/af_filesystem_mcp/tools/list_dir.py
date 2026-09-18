@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002
+from mcp.types import CallToolResult, TextContent
 
 from af_filesystem_mcp.tools._helpers import (
     append_next_actions,
@@ -48,7 +49,7 @@ def register(mcp: MCPServer) -> None:
         limit: int = 1000,
         *,
         ctx: Context[Any, Any],
-    ) -> str:
+    ) -> CallToolResult:
         """List the entries of a directory under your own AF home or data area.
 
         `root` selects which of your two confined areas to browse:
@@ -70,7 +71,7 @@ def register(mcp: MCPServer) -> None:
                 ],
             )
         output = _format_listing(result, root=root, path=path)
-        return append_next_actions(
+        text = append_next_actions(
             output,
             [
                 "Use `fs_read` to read a file's contents.",
@@ -78,3 +79,4 @@ def register(mcp: MCPServer) -> None:
                 "Use `fs_grep` to search file contents under this directory.",
             ],
         )
+        return CallToolResult(content=[TextContent(type="text", text=text)])
