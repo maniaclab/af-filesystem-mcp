@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from mcp.server.mcpserver import MCPServer
@@ -18,11 +18,28 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def fs_list() -> Callable[..., Awaitable[CallToolResult]]:
+def fs_list_tool() -> Any:
     mcp = MCPServer("test")
     register(mcp)
-    tools = {tool.name: tool.fn for tool in mcp._tool_manager.list_tools()}
-    return tools["fs_list"]
+    return next(
+        tool for tool in mcp._tool_manager.list_tools() if tool.name == "fs_list"
+    )
+
+
+@pytest.fixture
+def fs_list(fs_list_tool: Any) -> Callable[..., Awaitable[CallToolResult]]:
+    return fs_list_tool.fn  # type: ignore[no-any-return]
+
+
+class TestFsListRegistration:
+    def test_declares_read_only_annotations(self, fs_list_tool: Any) -> None:
+        assert fs_list_tool.annotations is not None
+        assert fs_list_tool.annotations.read_only_hint is True
+        assert fs_list_tool.annotations.open_world_hint is False
+
+    def test_publishes_an_output_schema(self, fs_list_tool: Any) -> None:
+        assert fs_list_tool.output_schema is not None
+        assert "entries" in fs_list_tool.output_schema["properties"]
 
 
 class TestFsList:
@@ -42,6 +59,10 @@ class TestFsList:
         assert "notes.txt" in output
         assert "Next actions" in output
         assert result.is_error is not True
+        assert result.structured_content is not None
+        assert result.structured_content["root"] == "home"
+        assert result.structured_content["total"] == 1
+        assert result.structured_content["entries"][0]["name"] == "notes.txt"
 
     async def test_lists_data_entries_independently(
         self,

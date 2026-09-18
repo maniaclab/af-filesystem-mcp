@@ -3,16 +3,40 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002
-from mcp.types import CallToolResult, TextContent
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from pydantic import BaseModel
 
 from af_filesystem_mcp.tools._helpers import (
     append_next_actions,
     call_fs_op,
     format_error,
 )
+
+
+class FsEntry(BaseModel):
+    """One directory entry, as reported by ``fs_list`` (never dereferenced -- see helper/ops.py)."""
+
+    name: str
+    type: Literal["dir", "file", "symlink", "other"]
+    size: int | None
+    mtime: float
+    mode: int
+    target: str | None = None
+
+
+class FsListResult(BaseModel):
+    """Structured result of ``fs_list``."""
+
+    root: Literal["home", "data"]
+    path: str
+    entries: list[FsEntry]
+    offset: int
+    limit: int
+    total: int
+    truncated: bool
 
 
 def _format_entry(entry: dict[str, Any]) -> str:
@@ -41,7 +65,13 @@ def _format_listing(result: dict[str, Any], *, root: str, path: str) -> str:
 def register(mcp: MCPServer) -> None:
     """Register the fs_list tool."""
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="List directory",
+            read_only_hint=True,
+            open_world_hint=False,
+        )
+    )
     async def fs_list(
         root: Literal["home", "data"],
         path: str = "",
@@ -49,7 +79,7 @@ def register(mcp: MCPServer) -> None:
         limit: int = 1000,
         *,
         ctx: Context[Any, Any],
-    ) -> CallToolResult:
+    ) -> Annotated[CallToolResult, FsListResult]:
         """List the entries of a directory under your own AF home or data area.
 
         `root` selects which of your two confined areas to browse:
@@ -79,4 +109,8 @@ def register(mcp: MCPServer) -> None:
                 "Use `fs_grep` to search file contents under this directory.",
             ],
         )
-        return CallToolResult(content=[TextContent(type="text", text=text)])
+        payload = FsListResult(root=root, **result)
+        return CallToolResult(
+            content=[TextContent(type="text", text=text)],
+            structured_content=payload.model_dump(mode="json"),
+        )
