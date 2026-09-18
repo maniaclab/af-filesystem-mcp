@@ -406,7 +406,18 @@ def grep_files(
     without raising. Stops as soon as either *max_files* files have been
     scanned or *max_matches* total matches have been collected --
     ``truncated`` tells the caller which (if either) cap was hit.
+
+    Every cap is clamped to its documented hard limit regardless of what the
+    caller asks for (issue #3) -- previously only the *default* values were
+    enforced, not a ceiling on a caller-supplied override.
     """
+    max_files = min(max(max_files, 1), MAX_GREP_MAX_FILES)
+    max_matches = min(max(max_matches, 1), MAX_GREP_MAX_MATCHES)
+    max_matches_per_file = min(
+        max(max_matches_per_file, 1), MAX_GREP_MAX_MATCHES_PER_FILE
+    )
+    max_depth = min(max(max_depth, 1), MAX_GREP_MAX_DEPTH)
+
     matches: list[dict[str, Any]] = []
     files_scanned = 0
     truncated = False

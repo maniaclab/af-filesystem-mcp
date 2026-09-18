@@ -224,6 +224,57 @@ class TestGrepFiles:
         assert result["files_scanned"] == 2
         assert result["truncated"] is True
 
+    def test_clamps_max_matches_to_the_documented_hard_limit(self, root: Path) -> None:
+        # issue #3: the tool docstring promises a hard limit of 200 total
+        # matches regardless of what the caller asks for. Spread across
+        # files so the (separately clamped) per-file cap doesn't mask this.
+        for i in range(20):
+            (root / f"f{i}.txt").write_text("\n".join(["needle"] * 50))
+        result = ops.grep_files(
+            root,
+            "",
+            pattern="needle",
+            max_matches=100_000,
+            max_files=100_000,
+            max_matches_per_file=100_000,
+        )
+        assert len(result["matches"]) == ops.MAX_GREP_MAX_MATCHES
+
+    def test_clamps_max_files_to_the_documented_hard_limit(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # issue #3: the tool docstring promises a hard limit of 500 files
+        # scanned regardless of what the caller asks for. A smaller ceiling
+        # is monkeypatched in so the test doesn't need 501 real files.
+        monkeypatch.setattr(ops, "MAX_GREP_MAX_FILES", 3)
+        for i in range(5):
+            (root / f"f{i}.txt").write_text("needle\n")
+        result = ops.grep_files(root, "", pattern="needle", max_files=100_000)
+        assert result["files_scanned"] == 3
+
+    def test_clamps_max_matches_per_file_to_the_documented_hard_limit(
+        self, root: Path
+    ) -> None:
+        (root / "a.txt").write_text("\n".join(["needle"] * 50))
+        result = ops.grep_files(
+            root,
+            "",
+            pattern="needle",
+            max_matches_per_file=100_000,
+            max_matches=100_000,
+        )
+        assert len(result["matches"]) == ops.MAX_GREP_MAX_MATCHES_PER_FILE
+
+    def test_clamps_max_depth_to_the_documented_hard_limit(
+        self, root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(ops, "MAX_GREP_MAX_DEPTH", 1)
+        nested = root / "a" / "b"
+        nested.mkdir(parents=True)
+        (nested / "deep.txt").write_text("needle\n")
+        result = ops.grep_files(root, "", pattern="needle", max_depth=100_000)
+        assert result["matches"] == []
+
     def test_does_not_descend_into_symlinked_directories(self, root: Path) -> None:
         other = root.parent / "bob"
         (other).mkdir()
