@@ -85,6 +85,7 @@ src/af_filesystem_mcp/
 ├── roots.py            # RootsConfig: the /home, /data prefix roots
 ├── paths.py            # resolve_confined, secure_open_confined, UserRoots
 ├── impersonate.py      # run_helper/run_helper_json: per-call impersonated subprocess
+├── budgets.py          # Budgets: fs_read/fs_grep per-call token/byte ceilings
 ├── auth/
 │   ├── local.py         # stdio mode: the server process's own uid/gid
 │   └── broker.py        # HTTP mode: broker-issued JWT -> Identity
