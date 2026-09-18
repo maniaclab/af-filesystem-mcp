@@ -14,6 +14,8 @@ import asyncio
 import json
 from typing import TYPE_CHECKING, Any, Literal
 
+from mcp.types import CallToolResult, TextContent
+
 from af_filesystem_mcp.impersonate import (
     HelperError,
     HelperTimeoutError,
@@ -134,14 +136,17 @@ async def call_fs_op(
     return result
 
 
-def format_error(exc: Exception, *, hints: list[str] | None = None) -> str:
-    """Format *exc* as an LLM-facing error string, never raising.
+def format_error(exc: Exception, *, hints: list[str] | None = None) -> CallToolResult:
+    """Format *exc* as an LLM-facing ``is_error`` result, never raising.
 
     ``HelperError``'s ``"TAG: detail"`` contract (see
     ``af_filesystem_mcp.helper.__main__``) is parsed to attach a friendly,
     plain-English prefix; an unrecognized tag (a helper contract change
     this module hasn't been updated for) falls back to the raw message
-    rather than hiding it.
+    rather than hiding it. No ``structured_content`` is set: an error
+    result carries no structured payload (mcp SDK's ``convert_result``
+    only validates ``structured_content`` against the tool's output
+    model when ``is_error`` is false).
     """
     if isinstance(exc, HelperTimeoutError):
         message = f"Error: the filesystem operation timed out ({exc})."
@@ -151,7 +156,8 @@ def format_error(exc: Exception, *, hints: list[str] | None = None) -> str:
         message = f"Error: {prefix} ({detail})" if prefix else f"Error: {exc}"
     else:
         message = f"Error: {exc}"
-    return append_next_actions(message, hints or [])
+    text = append_next_actions(message, hints or [])
+    return CallToolResult(content=[TextContent(type="text", text=text)], is_error=True)
 
 
 def append_next_actions(output: str, actions: list[str]) -> str:

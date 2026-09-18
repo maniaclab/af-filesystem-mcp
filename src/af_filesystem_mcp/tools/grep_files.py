@@ -2,15 +2,36 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from pydantic import BaseModel
 
 from af_filesystem_mcp.tools._helpers import (
     append_next_actions,
     call_fs_op,
     format_error,
 )
+
+
+class FsGrepMatch(BaseModel):
+    """One matching line, as reported by ``fs_grep``."""
+
+    path: str
+    line_number: int
+    line: str
+
+
+class FsGrepResult(BaseModel):
+    """Structured result of ``fs_grep``."""
+
+    root: Literal["home", "data"]
+    path: str
+    pattern: str
+    matches: list[FsGrepMatch]
+    files_scanned: int
+    truncated: bool
 
 
 def _format_matches(result: dict[str, Any]) -> str:
@@ -32,7 +53,13 @@ def _format_matches(result: dict[str, Any]) -> str:
 def register(mcp: MCPServer) -> None:
     """Register the fs_grep tool."""
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Search file contents",
+            read_only_hint=True,
+            open_world_hint=False,
+        )
+    )
     async def fs_grep(
         root: Literal["home", "data"],
         pattern: str,
@@ -41,7 +68,7 @@ def register(mcp: MCPServer) -> None:
         max_matches: int = 200,
         *,
         ctx: Context[Any, Any],
-    ) -> str:
+    ) -> Annotated[CallToolResult, FsGrepResult]:
         """Search for a literal substring across files under a directory (recursive).
 
         `root` selects "home" (`/home/<you>`) or "data" (`/data/<you>`);
@@ -71,10 +98,15 @@ def register(mcp: MCPServer) -> None:
                 ],
             )
         output = _format_matches(result)
-        return append_next_actions(
+        text = append_next_actions(
             output,
             [
                 "Use `fs_read` to see more context around a match.",
                 "Narrow `path` to a subdirectory if the result was truncated.",
             ],
+        )
+        payload = FsGrepResult(root=root, **result)
+        return CallToolResult(
+            content=[TextContent(type="text", text=text)],
+            structured_content=payload.model_dump(mode="json"),
         )

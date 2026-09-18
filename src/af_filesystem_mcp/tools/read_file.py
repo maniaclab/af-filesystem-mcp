@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from pydantic import BaseModel
 
 from af_filesystem_mcp.tools._helpers import (
     append_next_actions,
@@ -13,10 +15,25 @@ from af_filesystem_mcp.tools._helpers import (
 )
 
 
+class FsReadResult(BaseModel):
+    """Structured result of ``fs_read``."""
+
+    root: Literal["home", "data"]
+    path: str
+    content: str
+    truncated: bool
+
+
 def register(mcp: MCPServer) -> None:
     """Register the fs_read tool."""
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Read file",
+            read_only_hint=True,
+            open_world_hint=False,
+        )
+    )
     async def fs_read(
         root: Literal["home", "data"],
         path: str,
@@ -27,7 +44,7 @@ def register(mcp: MCPServer) -> None:
         num_lines: int = 200,
         *,
         ctx: Context[Any, Any],
-    ) -> str:
+    ) -> Annotated[CallToolResult, FsReadResult]:
         """Read a file under your own AF home or data area.
 
         `root` selects "home" (`/home/<you>`) or "data" (`/data/<you>`);
@@ -67,9 +84,14 @@ def register(mcp: MCPServer) -> None:
         output = result["content"]
         if result["truncated"]:
             output += "\n\n[... truncated ...]"
-        return append_next_actions(
+        text = append_next_actions(
             output,
             [
                 "Use `fs_read` again with a different `offset`/`start_line` to see more.",
             ],
+        )
+        payload = FsReadResult(root=root, **result)
+        return CallToolResult(
+            content=[TextContent(type="text", text=text)],
+            structured_content=payload.model_dump(mode="json"),
         )

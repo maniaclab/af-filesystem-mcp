@@ -4,15 +4,30 @@ from __future__ import annotations
 
 import stat
 from datetime import datetime, timezone
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002
+from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from pydantic import BaseModel
 
 from af_filesystem_mcp.tools._helpers import (
     append_next_actions,
     call_fs_op,
     format_error,
 )
+
+
+class FsStatResult(BaseModel):
+    """Structured result of ``fs_stat``."""
+
+    root: Literal["home", "data"]
+    path: str
+    name: str
+    type: Literal["dir", "file", "symlink", "other"]
+    size: int | None
+    mtime: float
+    mode: int
+    target: str | None = None
 
 
 def _format_stat(result: dict[str, Any]) -> str:
@@ -35,13 +50,19 @@ def _format_stat(result: dict[str, Any]) -> str:
 def register(mcp: MCPServer) -> None:
     """Register the fs_stat tool."""
 
-    @mcp.tool()
+    @mcp.tool(
+        annotations=ToolAnnotations(
+            title="Stat path",
+            read_only_hint=True,
+            open_world_hint=False,
+        )
+    )
     async def fs_stat(
         root: Literal["home", "data"],
         path: str = "",
         *,
         ctx: Context[Any, Any],
-    ) -> str:
+    ) -> Annotated[CallToolResult, FsStatResult]:
         """Get metadata (type, size, mtime, permissions) for one path.
 
         `root` selects which of your two confined areas to look in: "home"
@@ -56,10 +77,15 @@ def register(mcp: MCPServer) -> None:
                 exc, hints=["Use `fs_list` on the parent directory to check the name."]
             )
         output = _format_stat(result)
-        return append_next_actions(
+        text = append_next_actions(
             output,
             [
                 "Use `fs_read` if this is a file you want the contents of.",
                 "Use `fs_list` if this is a directory you want to browse.",
             ],
+        )
+        payload = FsStatResult(root=root, **result)
+        return CallToolResult(
+            content=[TextContent(type="text", text=text)],
+            structured_content=payload.model_dump(mode="json"),
         )

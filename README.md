@@ -15,16 +15,19 @@ around.
 
 ## What it does
 
-- **List** a directory (`fs_list`)
-- **Read** a file, by byte range or line range, including head/tail (`fs_read`)
-- **Stat** a path — size, mtime, type, permissions (`fs_stat`)
-- **Grep** for a pattern across files under a directory, capped in files scanned
-  and matches returned (`fs_grep`)
+| Tool      | Does                                                                                              | Read/write |
+| --------- | ------------------------------------------------------------------------------------------------- | ---------- |
+| `fs_list` | List a directory                                                                                  | read-only  |
+| `fs_read` | Read a file, by byte range or line range, including head/tail                                     | read-only  |
+| `fs_stat` | Stat a path — size, mtime, type, permissions                                                      | read-only  |
+| `fs_grep` | Search for a pattern across files under a directory, capped in files scanned and matches returned | read-only  |
 
-That is the entire v1 tool surface. There is deliberately no write tool, no
-delete, no chmod, no arbitrary command execution, and no full-tree walk
-(directory-size, duplicate-finder). See `CLAUDE.md` for the design rationale and
-phase-2 (write) plan.
+That is the entire v1 tool surface: all four tools are read-only
+(`read_only_hint=true` in their MCP tool annotations) and confined to the
+caller's own two AF roots (`open_world_hint=false`). There is deliberately no
+write tool, no delete, no chmod, no arbitrary command execution, and no
+full-tree walk (directory-size, duplicate-finder). See `CLAUDE.md` for the
+design rationale and phase-2 (write) plan.
 
 <!-- --8<-- [end:what-it-does] -->
 
