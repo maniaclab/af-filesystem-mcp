@@ -94,6 +94,10 @@ Build the `af-filesystem-mcp serve` argument string from values.
     "--data-root" .Values.data.mountPath
     "--timeout-seconds" (.Values.limits.timeoutSeconds | toString)
     "--max-concurrent-calls-per-user" (.Values.limits.maxConcurrentCallsPerUser | toString)
+    "--max-read-bytes" (.Values.limits.maxReadBytes | int64 | toString)
+    "--max-read-file-size" (.Values.limits.maxReadFileSize | int64 | toString)
+    "--max-grep-output-bytes" (.Values.limits.maxGrepOutputBytes | int64 | toString)
+    "--max-line-chars" (.Values.limits.maxLineChars | int | toString)
     "--forwarded-allow-ips" (printf "'%s'" .Values.forwardedAllowIps)
     "--log-level" .Values.logLevel -}}
 {{- with .Values.auth.broker.jwksUrl -}}

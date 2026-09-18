@@ -30,7 +30,7 @@ import errno
 import os
 import stat as stat_module
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, NamedTuple
+from typing import IO, TYPE_CHECKING, Any, Literal, NamedTuple
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -46,19 +46,48 @@ DEFAULT_LIST_LIMIT = 1000
 #: No caller-supplied ``limit`` may exceed this, regardless of request.
 MAX_LIST_LIMIT = 5000
 
-#: fs_read default/maximum bytes returned per call.
-DEFAULT_READ_BYTES_LIMIT = 1_048_576  # 1 MiB
-MAX_READ_BYTES_LIMIT = 8 * 1_048_576  # 8 MiB hard cap regardless of caller request
+#: fs_read default/maximum bytes returned per call. 64 KiB (~16k tokens) is
+#: sized to fit nearly any single source file/config in one call without
+#: risking a multi-hundred-thousand-token result the way the old 1 MiB
+#: default (~260k tokens) could (issue #5).
+DEFAULT_READ_BYTES_LIMIT = 64 * 1024  # 64 KiB
+MAX_READ_BYTES_LIMIT = 256 * 1024  # 256 KiB hard cap regardless of caller request
+
+#: A bare whole-file `mode="bytes"` read (no offset/length given) on a file
+#: larger than this is refused outright rather than silently truncated --
+#: see read_file's docstring for exactly which requests this guard applies
+#: to. offset/length/head/tail/lines reads are never blocked by this; only
+#: an unbounded "just read me everything" request on an oversized file is.
+DEFAULT_MAX_READ_FILE_SIZE = 8 * 1_048_576  # 8 MiB
 
 #: fs_read default line count for head/tail/lines modes.
 DEFAULT_NUM_LINES = 200
 MAX_NUM_LINES = 5000
 
-#: fs_grep defaults/hard caps.
+#: fs_grep defaults (also the pre-#3 values, which were never enforced).
 DEFAULT_GREP_MAX_FILES = 500
 DEFAULT_GREP_MAX_MATCHES = 200
 DEFAULT_GREP_MAX_MATCHES_PER_FILE = 20
 DEFAULT_GREP_MAX_DEPTH = 12
+
+#: fs_grep hard ceilings -- issue #3: the tool docstring already promised
+#: these numbers as hard limits, but nothing clamped a caller-supplied value
+#: to them. Kept separate from the DEFAULT_GREP_* names above so "default"
+#: and "ceiling" can never silently mean the same number again.
+MAX_GREP_MAX_FILES = 500
+MAX_GREP_MAX_MATCHES = 200
+MAX_GREP_MAX_MATCHES_PER_FILE = 20
+MAX_GREP_MAX_DEPTH = 12
+
+#: Each returned match's line text is truncated to this many characters
+#: (issue #5): a single-line minified/JSON file could otherwise make one
+#: "match" megabytes long.
+DEFAULT_MAX_LINE_CHARS = 200
+
+#: Total budget, in bytes of (already-truncated) snippet text, for one
+#: fs_grep call -- on top of max_matches, since max_matches alone still
+#: allows up to max_matches * max_line_chars bytes back.
+DEFAULT_GREP_MAX_OUTPUT_BYTES = 64 * 1024  # 64 KiB
 
 
 ReadMode = Literal["bytes", "head", "tail", "lines"]
@@ -189,6 +218,69 @@ def stat_path(root: Path, relative: str) -> dict[str, Any]:
     return entry | {"path": relative}
 
 
+def _read_head(fh: IO[bytes], *, num_lines: int, max_bytes: int) -> tuple[bytes, bool]:
+    """Return ``(content, truncated)`` for ``mode="head"``: the first *num_lines* lines, capped at *max_bytes*."""
+    raw = fh.read(max_bytes + 1)
+    truncated = len(raw) > max_bytes
+    raw = raw[:max_bytes]
+    lines = raw.splitlines(keepends=True)
+    if truncated and lines and not lines[-1].endswith(b"\n"):
+        # The byte cap landed mid-line; drop the partial trailing
+        # fragment rather than return a line cut off mid-content.
+        lines = lines[:-1]
+    return b"".join(lines[:num_lines]), truncated
+
+
+def _read_tail(
+    fh: IO[bytes], *, size: int, num_lines: int, max_bytes: int
+) -> tuple[bytes, bool]:
+    """Return ``(content, truncated)`` for ``mode="tail"``: the file's real last *num_lines* lines.
+
+    Issue #4: seeks to the last *max_bytes* bytes of the file rather than
+    reading from the start, so tailing a file larger than *max_bytes*
+    returns the file's actual tail, not lines from an arbitrary earlier
+    window (the previous bug: the first *max_bytes* were read, then the
+    last *num_lines* of *that* window were taken).
+    """
+    seek_pos = max(0, size - max_bytes)
+    fh.seek(seek_pos)
+    raw = fh.read()
+    lines = raw.splitlines(keepends=True)
+    if seek_pos > 0 and lines:
+        # Landed mid-line (true unless seek_pos happens to fall exactly on
+        # a line boundary) -- drop the partial leading fragment so a
+        # truncated first line is never mistaken for a real one.
+        lines = lines[1:]
+    return b"".join(lines[-num_lines:]), seek_pos > 0
+
+
+def _read_lines(
+    fh: IO[bytes], *, start_line: int, num_lines: int, max_bytes: int
+) -> tuple[bytes, bool]:
+    """Return ``(content, truncated)`` for ``mode="lines"``: *num_lines* lines starting at *start_line*.
+
+    Streams from the start of the file rather than slicing a fixed front
+    window, so a *start_line* beyond the first *max_bytes* bytes is still
+    reachable (issue #4) -- the cost of reaching it is a forward scan of
+    the skipped lines, bounded by the helper subprocess's overall
+    wall-clock timeout rather than by *max_bytes*.
+    """
+    selected: list[bytes] = []
+    total_bytes = 0
+    truncated = False
+    for index, line in enumerate(fh):
+        if index < start_line:
+            continue
+        if len(selected) >= num_lines:
+            break
+        total_bytes += len(line)
+        if total_bytes > max_bytes:
+            truncated = True
+            break
+        selected.append(line)
+    return b"".join(selected), truncated
+
+
 def read_file(
     root: Path,
     relative: str,
@@ -205,19 +297,34 @@ def read_file(
     start_line: int = 0,
     num_lines: int = DEFAULT_NUM_LINES,
     max_bytes: int = DEFAULT_READ_BYTES_LIMIT,
+    max_file_size: int = DEFAULT_MAX_READ_FILE_SIZE,
 ) -> dict[str, Any]:
     """Read *relative* under *root*, never following any symlink (see module docstring).
 
     ``mode="bytes"``: returns bytes ``[offset, offset+length)``, capped at
-    *max_bytes* (itself capped at ``MAX_READ_BYTES_LIMIT``).
+    *max_bytes* (itself capped at ``MAX_READ_BYTES_LIMIT``). A *bare* whole-
+    file request (no *offset*, no *length*) on a file larger than
+    *max_file_size* is refused outright with a ``ValueError`` naming the
+    real size, rather than silently returning a truncated window with no
+    indication of how much was left out (issue #5) -- an explicit *offset*
+    or *length* is never blocked by this, since it is already a bounded
+    request.
 
-    ``mode="head"``/``"tail"``: the first/last *num_lines* lines.
+    ``mode="head"``/``"tail"``: the first/last *num_lines* lines. ``tail``
+    seeks to the file's real last *max_bytes* bytes rather than reading
+    from the start (issue #4) -- tailing a file larger than *max_bytes*
+    returns the file's actual tail, not lines from an arbitrary earlier
+    window.
 
-    ``mode="lines"``: *num_lines* lines starting at *start_line* (0-based).
+    ``mode="lines"``: *num_lines* lines starting at *start_line* (0-based),
+    reachable anywhere in the file (not just the first *max_bytes*).
 
     Content is decoded as UTF-8 with invalid sequences replaced (never
     raises on binary content) and returned as a plain ``str`` -- the MCP
-    tool layer is the one that decides how to present it to the LLM.
+    tool layer is the one that decides how to present it to the LLM. The
+    file's real ``size`` is always reported alongside ``content``, so a
+    caller can tell a small truncation (one page of a big file) apart from
+    "this is the entire file".
     """
     max_bytes = min(max(max_bytes, 1), MAX_READ_BYTES_LIMIT)
 
@@ -236,6 +343,21 @@ def read_file(
         msg = f"{relative!r} is a directory"
         raise IsADirectoryError(msg)
 
+    if (
+        mode == "bytes"
+        and offset == 0
+        and length is None
+        and st.st_size > max_file_size
+    ):
+        os.close(fd)
+        msg = (
+            f"{relative!r} is {st.st_size} bytes, larger than the "
+            f"{max_file_size}-byte limit for a bare whole-file read -- use "
+            "mode='head'/'tail'/'lines', or mode='bytes' with an explicit "
+            "offset/length, to read part of it"
+        )
+        raise ValueError(msg)
+
     # os.fdopen(..., closefd=True) takes ownership of fd from this point:
     # it is closed when the `with` block exits, on every path (normal
     # return or an exception raised while reading).
@@ -249,23 +371,27 @@ def read_file(
             content = raw[:requested]
         else:
             num_lines = min(max(num_lines, 1), MAX_NUM_LINES)
-            all_lines = fh.read(max_bytes + 1).splitlines(keepends=True)
-            truncated = len(b"".join(all_lines)) > max_bytes
             if mode == "head":
-                selected = all_lines[:num_lines]
+                content, truncated = _read_head(
+                    fh, num_lines=num_lines, max_bytes=max_bytes
+                )
             elif mode == "tail":
-                selected = all_lines[-num_lines:]
+                content, truncated = _read_tail(
+                    fh, size=st.st_size, num_lines=num_lines, max_bytes=max_bytes
+                )
             elif mode == "lines":
-                selected = all_lines[start_line : start_line + num_lines]
+                content, truncated = _read_lines(
+                    fh, start_line=start_line, num_lines=num_lines, max_bytes=max_bytes
+                )
             else:  # pragma: no cover - guarded by the tool layer's enum
                 msg = f"unknown read mode: {mode!r}"
                 raise ValueError(msg)
-            content = b"".join(selected)
 
     return {
         "path": relative,
         "content": content.decode("utf-8", errors="replace"),
         "truncated": truncated,
+        "size": st.st_size,
     }
 
 
@@ -369,23 +495,60 @@ def grep_files(
     max_matches: int = DEFAULT_GREP_MAX_MATCHES,
     max_matches_per_file: int = DEFAULT_GREP_MAX_MATCHES_PER_FILE,
     max_depth: int = DEFAULT_GREP_MAX_DEPTH,
+    max_line_chars: int = DEFAULT_MAX_LINE_CHARS,
+    max_output_bytes: int = DEFAULT_GREP_MAX_OUTPUT_BYTES,
 ) -> dict[str, Any]:
     """Search for the substring *pattern* in files under *relative* (recursive, capped).
 
     Never descends into or reads through a symlink (see module docstring).
     Binary files (content that cannot be decoded as UTF-8) are skipped
-    without raising. Stops as soon as either *max_files* files have been
-    scanned or *max_matches* total matches have been collected --
-    ``truncated`` tells the caller which (if either) cap was hit.
+    without raising. Stops as soon as any of *max_files* files scanned,
+    *max_matches* total matches, or *max_output_bytes* of (already
+    per-line-truncated) snippet text is reached -- ``truncated`` tells the
+    caller a cap was hit, though not which one.
+
+    Every count-based cap is clamped to its documented hard limit regardless
+    of what the caller asks for (issue #3) -- previously only the *default*
+    values were enforced, not a ceiling on a caller-supplied override.
+
+    Each match's line text is truncated to *max_line_chars* (issue #5): a
+    single long line -- a minified JS/JSON file, say -- would otherwise make
+    one "match" arbitrarily large, and *max_matches* alone still allows up
+    to ``max_matches * max_line_chars`` bytes back, hence the separate
+    *max_output_bytes* budget on top of it.
+
+    Matches are grouped by file: ``{"files": [{"path", "match_count",
+    "matches": [{"line_number", "line", "truncated"}]}], "files_scanned",
+    "total_matches", "truncated"}`` -- compacter than a flat list that
+    repeats "path" on every match, and lets a caller often skip a follow-up
+    fs_read entirely.
     """
-    matches: list[dict[str, Any]] = []
+    max_files = min(max(max_files, 1), MAX_GREP_MAX_FILES)
+    max_matches = min(max(max_matches, 1), MAX_GREP_MAX_MATCHES)
+    max_matches_per_file = min(
+        max(max_matches_per_file, 1), MAX_GREP_MAX_MATCHES_PER_FILE
+    )
+    max_depth = min(max(max_depth, 1), MAX_GREP_MAX_DEPTH)
+    max_line_chars = max(max_line_chars, 1)
+    max_output_bytes = max(max_output_bytes, 1)
+
+    files: list[dict[str, Any]] = []
     files_scanned = 0
+    total_matches = 0
+    output_bytes = 0
     truncated = False
+
+    def _budget_exhausted() -> bool:
+        return (
+            files_scanned >= max_files
+            or total_matches >= max_matches
+            or output_bytes >= max_output_bytes
+        )
 
     for dir_fd, name, rel_path in _iter_files_no_follow(
         root, relative, max_depth=max_depth
     ):
-        if files_scanned >= max_files or len(matches) >= max_matches:
+        if _budget_exhausted():
             truncated = True
             break
         files_scanned += 1
@@ -395,38 +558,51 @@ def grep_files(
         except OSError:
             continue
 
-        per_file_matches = 0
+        file_matches: list[dict[str, Any]] = []
         with os.fdopen(fd, "rb") as fh:
             for line_number, raw_line in enumerate(fh, start=1):
-                if (
-                    per_file_matches >= max_matches_per_file
-                    or len(matches) >= max_matches
-                ):
+                if len(file_matches) >= max_matches_per_file or _budget_exhausted():
                     truncated = True
                     break
                 try:
                     line = raw_line.decode("utf-8")
                 except UnicodeDecodeError:
                     break  # treat as binary; skip the rest of this file
-                if pattern in line:
-                    matches.append(
-                        {
-                            "path": rel_path,
-                            "line_number": line_number,
-                            "line": line.rstrip("\n"),
-                        }
-                    )
-                    per_file_matches += 1
+                if pattern not in line:
+                    continue
+                text = line.rstrip("\n")
+                line_truncated = len(text) > max_line_chars
+                if line_truncated:
+                    text = text[:max_line_chars]
+                file_matches.append(
+                    {
+                        "line_number": line_number,
+                        "line": text,
+                        "truncated": line_truncated,
+                    }
+                )
+                total_matches += 1
+                output_bytes += len(text.encode("utf-8"))
 
-        if len(matches) >= max_matches:
+        if file_matches:
+            files.append(
+                {
+                    "path": rel_path,
+                    "match_count": len(file_matches),
+                    "matches": file_matches,
+                }
+            )
+
+        if _budget_exhausted():
             truncated = True
             break
 
     return {
         "path": relative,
         "pattern": pattern,
-        "matches": matches,
+        "files": files,
         "files_scanned": files_scanned,
+        "total_matches": total_matches,
         "truncated": truncated,
     }
 

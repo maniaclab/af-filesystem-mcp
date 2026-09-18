@@ -61,6 +61,7 @@ class TestFsRead:
         assert result.structured_content["root"] == "home"
         assert result.structured_content["content"] == "hello world"
         assert result.structured_content["truncated"] is False
+        assert result.structured_content["size"] == len("hello world")
 
     async def test_head_mode_returns_first_lines(
         self,
@@ -82,6 +83,26 @@ class TestFsRead:
 
         assert output.startswith("L0\nL1")
         assert "L9" not in output
+
+    async def test_oversized_bare_read_returns_a_friendly_error(
+        self,
+        fs_read: Callable[..., Awaitable[CallToolResult]],
+        mock_ctx: MagicMock,
+        fs_roots: tuple[Path, Path],
+        tool_text: Callable[[CallToolResult], str],
+    ) -> None:
+        # issue #5: a bare fs_read (no offset/length) of a file larger than
+        # the server's whole-file-read limit (default 8 MiB) must be
+        # refused with a clear error rather than silently truncated.
+        home_root, _ = fs_roots
+        big = home_root / "alice" / "big.bin"
+        big.write_bytes(b"x" * (8 * 1024 * 1024 + 1))
+
+        result = await fs_read(root="home", path="big.bin", ctx=mock_ctx)
+        output = tool_text(result)
+
+        assert result.is_error is True
+        assert "Error" in output
 
     async def test_refuses_to_follow_symlink(
         self,

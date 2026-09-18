@@ -39,6 +39,23 @@ import os as os  # noqa: PLC0414  # pylint: disable=useless-import-alias
 import sys
 from typing import Any
 
+#: Defense-in-depth ceiling on a single call's stdout (issue #5): the real
+#: bound on memory/tokens is each op's own budget in helper.ops, enforced
+#: before the helper ever writes a byte -- this just catches a bug in that
+#: layer (or a future op that forgets its budget) before an implausibly
+#: large result is handed to the LLM. Far above any legitimate op output
+#: under the current budgets (fs_read maxes out at MAX_READ_BYTES_LIMIT,
+#: fs_grep at DEFAULT_GREP_MAX_OUTPUT_BYTES plus JSON overhead).
+#:
+#: This check runs *after* `proc.communicate()` returns, so it is a
+#: post-hoc guard, not a streaming one: the memory for an oversized stdout
+#: is already spent by the time this fires. Streaming enforcement would
+#: mean hand-rolling a chunked read with a running total plus a concurrent
+#: stderr drain (to avoid deadlocking on a full pipe buffer) -- a lot of
+#: machinery for a guard whose job is catching a bug that should never
+#: happen, not for bounding memory under normal operation.
+MAX_HELPER_STDOUT_BYTES = 4 * 1_048_576  # 4 MiB
+
 
 class HelperTimeoutError(Exception):
     """Raised when the helper subprocess exceeds its wall-clock budget."""
@@ -100,6 +117,13 @@ async def run_helper(
     if proc.returncode != 0:
         detail = stderr.decode(errors="replace").strip()
         msg = detail or f"filesystem helper exited {proc.returncode}"
+        raise HelperError(msg)
+
+    if len(stdout) > MAX_HELPER_STDOUT_BYTES:
+        msg = (
+            f"filesystem helper produced {len(stdout)} bytes of stdout, "
+            f"over the {MAX_HELPER_STDOUT_BYTES}-byte limit"
+        )
         raise HelperError(msg)
 
     return stdout

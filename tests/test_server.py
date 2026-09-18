@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING, Any
 import pytest
 from starlette.testclient import TestClient
 
+from af_filesystem_mcp.budgets import Budgets
 from af_filesystem_mcp.server import (
     _configure_logging,
     _make_broker_app,
@@ -85,6 +86,19 @@ class TestMakeStdioMcp:
             assert identity.unixname
             assert ctx_dict["roots_config"].data_root == tmp_path
             assert ctx_dict["roots_config"].home_root == Path("/home")
+
+    async def test_lifespan_yields_the_configured_budgets(self, tmp_path: Path) -> None:
+        budgets = Budgets(read_max_bytes=1234)
+        mcp = _make_stdio_mcp(data_root=tmp_path, budgets=budgets)
+        assert mcp.settings.lifespan is not None
+        async with mcp.settings.lifespan(mcp) as ctx_dict:
+            assert ctx_dict["budgets"] is budgets
+
+    async def test_lifespan_defaults_to_budgets_defaults(self, tmp_path: Path) -> None:
+        mcp = _make_stdio_mcp(data_root=tmp_path)
+        assert mcp.settings.lifespan is not None
+        async with mcp.settings.lifespan(mcp) as ctx_dict:
+            assert ctx_dict["budgets"] == Budgets()
 
 
 class TestStdioAppOverTheWire:

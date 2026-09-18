@@ -71,7 +71,7 @@ class TestSuccessfulOps:
         main(["grep", _payload(root=str(root), relative="", pattern="needle")])
 
         out = json.loads(capsys.readouterr().out)
-        assert out["matches"][0]["path"] == "f.txt"
+        assert out["files"][0]["path"] == "f.txt"
 
 
 class TestErrorHandling:

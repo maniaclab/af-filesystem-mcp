@@ -54,6 +54,23 @@ limits:
   # (--max-concurrent-calls-per-user) -- one user's runaway fs_grep degrades
   # only their own throughput, not everyone else's NFS RTT.
   maxConcurrentCallsPerUser: 4
+  # fs_read's per-call byte window (--max-read-bytes). Sized to fit nearly
+  # any single source file/config in one call (~16k tokens) without risking
+  # a multi-hundred-thousand-token result.
+  maxReadBytes: 65536
+  # Largest file fs_read will read in one bare whole-file request (no
+  # offset/length) before refusing outright (--max-read-file-size) -- see
+  # af_filesystem_mcp.helper.ops.read_file's docstring for exactly which
+  # requests this applies to.
+  maxReadFileSize: 8388608
+  # fs_grep's total snippet-bytes budget per call (--max-grep-output-bytes)
+  # -- on top of max_matches, since max_matches alone still allows up to
+  # max_matches * maxLineChars bytes back.
+  maxGrepOutputBytes: 65536
+  # fs_grep's per-match line-text character cap (--max-line-chars) -- a
+  # single long line (e.g. a minified JS/JSON file) can't make one match
+  # arbitrarily large.
+  maxLineChars: 200
 
 # Broker mode (af-mcp-platform docs): bearers are broker-issued identity JWTs
 # (aud=af-filesystem-mcp) carrying uid/gid/unixname POSIX claims
