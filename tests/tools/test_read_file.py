@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from mcp.server.mcpserver import MCPServer
@@ -18,11 +18,28 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def fs_read() -> Callable[..., Awaitable[CallToolResult]]:
+def fs_read_tool() -> Any:
     mcp = MCPServer("test")
     register(mcp)
-    tools = {tool.name: tool.fn for tool in mcp._tool_manager.list_tools()}
-    return tools["fs_read"]
+    return next(
+        tool for tool in mcp._tool_manager.list_tools() if tool.name == "fs_read"
+    )
+
+
+@pytest.fixture
+def fs_read(fs_read_tool: Any) -> Callable[..., Awaitable[CallToolResult]]:
+    return fs_read_tool.fn  # type: ignore[no-any-return]
+
+
+class TestFsReadRegistration:
+    def test_declares_read_only_annotations(self, fs_read_tool: Any) -> None:
+        assert fs_read_tool.annotations is not None
+        assert fs_read_tool.annotations.read_only_hint is True
+        assert fs_read_tool.annotations.open_world_hint is False
+
+    def test_publishes_an_output_schema(self, fs_read_tool: Any) -> None:
+        assert fs_read_tool.output_schema is not None
+        assert "content" in fs_read_tool.output_schema["properties"]
 
 
 class TestFsRead:
@@ -36,9 +53,14 @@ class TestFsRead:
         home_root, _ = fs_roots
         (home_root / "alice" / "f.txt").write_text("hello world")
 
-        output = tool_text(await fs_read(root="home", path="f.txt", ctx=mock_ctx))
+        result = await fs_read(root="home", path="f.txt", ctx=mock_ctx)
+        output = tool_text(result)
 
         assert output.startswith("hello world")
+        assert result.structured_content is not None
+        assert result.structured_content["root"] == "home"
+        assert result.structured_content["content"] == "hello world"
+        assert result.structured_content["truncated"] is False
 
     async def test_head_mode_returns_first_lines(
         self,
