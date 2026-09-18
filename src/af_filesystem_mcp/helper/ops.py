@@ -46,19 +46,48 @@ DEFAULT_LIST_LIMIT = 1000
 #: No caller-supplied ``limit`` may exceed this, regardless of request.
 MAX_LIST_LIMIT = 5000
 
-#: fs_read default/maximum bytes returned per call.
-DEFAULT_READ_BYTES_LIMIT = 1_048_576  # 1 MiB
-MAX_READ_BYTES_LIMIT = 8 * 1_048_576  # 8 MiB hard cap regardless of caller request
+#: fs_read default/maximum bytes returned per call. 64 KiB (~16k tokens) is
+#: sized to fit nearly any single source file/config in one call without
+#: risking a multi-hundred-thousand-token result the way the old 1 MiB
+#: default (~260k tokens) could (issue #5).
+DEFAULT_READ_BYTES_LIMIT = 64 * 1024  # 64 KiB
+MAX_READ_BYTES_LIMIT = 256 * 1024  # 256 KiB hard cap regardless of caller request
+
+#: A bare whole-file `mode="bytes"` read (no offset/length given) on a file
+#: larger than this is refused outright rather than silently truncated --
+#: see read_file's docstring for exactly which requests this guard applies
+#: to. offset/length/head/tail/lines reads are never blocked by this; only
+#: an unbounded "just read me everything" request on an oversized file is.
+DEFAULT_MAX_READ_FILE_SIZE = 8 * 1_048_576  # 8 MiB
 
 #: fs_read default line count for head/tail/lines modes.
 DEFAULT_NUM_LINES = 200
 MAX_NUM_LINES = 5000
 
-#: fs_grep defaults/hard caps.
+#: fs_grep defaults (also the pre-#3 values, which were never enforced).
 DEFAULT_GREP_MAX_FILES = 500
 DEFAULT_GREP_MAX_MATCHES = 200
 DEFAULT_GREP_MAX_MATCHES_PER_FILE = 20
 DEFAULT_GREP_MAX_DEPTH = 12
+
+#: fs_grep hard ceilings -- issue #3: the tool docstring already promised
+#: these numbers as hard limits, but nothing clamped a caller-supplied value
+#: to them. Kept separate from the DEFAULT_GREP_* names above so "default"
+#: and "ceiling" can never silently mean the same number again.
+MAX_GREP_MAX_FILES = 500
+MAX_GREP_MAX_MATCHES = 200
+MAX_GREP_MAX_MATCHES_PER_FILE = 20
+MAX_GREP_MAX_DEPTH = 12
+
+#: Each returned match's line text is truncated to this many characters
+#: (issue #5): a single-line minified/JSON file could otherwise make one
+#: "match" megabytes long.
+DEFAULT_MAX_LINE_CHARS = 200
+
+#: Total budget, in bytes of (already-truncated) snippet text, for one
+#: fs_grep call -- on top of max_matches, since max_matches alone still
+#: allows up to max_matches * max_line_chars bytes back.
+DEFAULT_GREP_MAX_OUTPUT_BYTES = 64 * 1024  # 64 KiB
 
 
 ReadMode = Literal["bytes", "head", "tail", "lines"]
