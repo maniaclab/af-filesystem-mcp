@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from mcp.server.mcpserver import MCPServer
@@ -18,11 +18,28 @@ if TYPE_CHECKING:
 
 
 @pytest.fixture
-def fs_grep() -> Callable[..., Awaitable[CallToolResult]]:
+def fs_grep_tool() -> Any:
     mcp = MCPServer("test")
     register(mcp)
-    tools = {tool.name: tool.fn for tool in mcp._tool_manager.list_tools()}
-    return tools["fs_grep"]
+    return next(
+        tool for tool in mcp._tool_manager.list_tools() if tool.name == "fs_grep"
+    )
+
+
+@pytest.fixture
+def fs_grep(fs_grep_tool: Any) -> Callable[..., Awaitable[CallToolResult]]:
+    return fs_grep_tool.fn  # type: ignore[no-any-return]
+
+
+class TestFsGrepRegistration:
+    def test_declares_read_only_annotations(self, fs_grep_tool: Any) -> None:
+        assert fs_grep_tool.annotations is not None
+        assert fs_grep_tool.annotations.read_only_hint is True
+        assert fs_grep_tool.annotations.open_world_hint is False
+
+    def test_publishes_an_output_schema(self, fs_grep_tool: Any) -> None:
+        assert fs_grep_tool.output_schema is not None
+        assert "matches" in fs_grep_tool.output_schema["properties"]
 
 
 class TestFsGrep:
@@ -38,11 +55,18 @@ class TestFsGrep:
             "line one\nERROR found\nline three\n"
         )
 
-        output = tool_text(
-            await fs_grep(root="home", pattern="ERROR", path="", ctx=mock_ctx)
-        )
+        result = await fs_grep(root="home", pattern="ERROR", path="", ctx=mock_ctx)
+        output = tool_text(result)
 
         assert "log.txt:2: ERROR found" in output
+        assert result.structured_content is not None
+        assert result.structured_content["root"] == "home"
+        assert result.structured_content["pattern"] == "ERROR"
+        assert result.structured_content["matches"][0] == {
+            "path": "log.txt",
+            "line_number": 2,
+            "line": "ERROR found",
+        }
 
     async def test_no_matches_reports_zero(
         self,
