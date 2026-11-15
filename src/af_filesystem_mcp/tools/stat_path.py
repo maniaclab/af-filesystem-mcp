@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import stat
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002
@@ -40,7 +40,7 @@ def _format_stat(result: dict[str, Any]) -> str:
     if result["size"] is not None:
         lines.append(f"size: {result['size']}B")
     lines.append(
-        f"mtime: {datetime.fromtimestamp(result['mtime'], tz=timezone.utc).isoformat()}"
+        f"mtime: {datetime.fromtimestamp(result['mtime'], tz=UTC).isoformat()}"
     )
     if "mode" in result:
         lines.append(f"mode: {stat.filemode(result['mode'])} ({oct(result['mode'])})")

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Any, Literal
 
 from mcp.server.mcpserver import Context, MCPServer  # noqa: TC002
@@ -45,7 +45,7 @@ def _format_entry(entry: dict[str, Any]) -> str:
     if entry_type == "symlink":
         return f"  [symlink] {name} -> {entry.get('target')}"
     size = f"{entry['size']}B" if entry["size"] is not None else "-"
-    mtime = datetime.fromtimestamp(entry["mtime"], tz=timezone.utc).isoformat()
+    mtime = datetime.fromtimestamp(entry["mtime"], tz=UTC).isoformat()
     return f"  [{entry_type}] {size:>10}  {mtime}  {name}"
 
 

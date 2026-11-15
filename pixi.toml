@@ -10,7 +10,7 @@ af-filesystem-mcp = { path = "./" }
 setuptools = "*"
 # Broker-mode client library (its [mcp] extra's mcp dependency is already a
 # direct dependency of af-filesystem-mcp itself)
-af-credentials = ">=0.2.0"
+af-credentials = ">=0.3.2"
 
 [package]
 name = "af-filesystem-mcp"
@@ -21,16 +21,13 @@ backend = { name = "pixi-build-python", version = "*" }
 config = { noarch = true }
 
 [package.host-dependencies]
-python = ">=3.10"
+python = ">=3.11"
 uv = "*"
 hatchling = ">=1.25"
 hatch-vcs = ">=0.4"
 
 [package.run-dependencies]
 mcp = ">=2.0.0,<3"
-
-[feature.py310.dependencies]
-python = "<3.11,>=3.10"
 
 [feature.py311.dependencies]
 python = "<3.12,>=3.11"
@@ -97,7 +94,6 @@ build-check = { cmd = "twine check --strict ./dist/*", depends-on = ["build"], d
 dev = ["dev"]
 docs = ["docs"]
 helm = { features = ["helm"], no-default-feature = true }
-py310 = ["test", "py310"]
 py311 = ["test", "py311"]
 py312 = ["test", "py312"]
 py313 = ["test", "py313"]

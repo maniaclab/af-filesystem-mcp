@@ -11,7 +11,7 @@ description = "MCP server for per-user, impersonated filesystem access on the AF
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 classifiers = [
   "Development Status :: 1 - Planning",
   "Intended Audience :: Science/Research",
@@ -20,7 +20,6 @@ classifiers = [
   "Programming Language :: Python",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -37,7 +36,7 @@ dependencies = [
 # POSIX claims. Unlike ami-mcp/rucio-mcp's broker mode, this backend never
 # redeems an x509 proxy -- the POSIX claims are all it needs.
 broker = [
-  "af-credentials[mcp]>=0.2.0",
+  "af-credentials[mcp]>=0.3.2",
 ]
 
 [project.scripts]
@@ -96,7 +95,7 @@ report.exclude_also = [
 [tool.mypy]
 files = ["src", "tests"]
 mypy_path = ["src"]
-python_version = "3.10"
+python_version = "3.11"
 warn_unused_configs = true
 strict = true
 enable_error_code = ["ignore-without-code", "redundant-expr", "truthy-bool"]
@@ -159,7 +158,7 @@ ignore = [
 "src/af_filesystem_mcp/helper/**" = ["T20"] # the helper subprocess talks JSON over stdout
 
 [tool.pylint]
-py-version = "3.10"
+py-version = "3.11"
 ignore-paths = [".*/_version.py"]
 reports.output-format = "colorized"
 similarities.ignore-imports = "yes"
