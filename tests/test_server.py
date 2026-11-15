@@ -12,8 +12,8 @@ import pytest
 from starlette.testclient import TestClient
 
 from af_filesystem_mcp.budgets import Budgets
+from af_filesystem_mcp.observability import configure_logging
 from af_filesystem_mcp.server import (
-    _configure_logging,
     _make_broker_app,
     _make_stdio_mcp,
 )
@@ -215,11 +215,11 @@ class TestConfigureLogging:
         root.setLevel(original)
 
     def test_debug_enables_library_debug_logging(self) -> None:
-        _configure_logging("debug")
+        configure_logging("debug")
         assert logging.getLogger("af_credentials.verifier").isEnabledFor(logging.DEBUG)
 
     def test_info_does_not_enable_debug(self) -> None:
-        _configure_logging("info")
+        configure_logging("info")
         verifier = logging.getLogger("af_credentials.verifier")
         assert not verifier.isEnabledFor(logging.DEBUG)
         assert verifier.isEnabledFor(logging.INFO)
