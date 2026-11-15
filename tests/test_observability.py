@@ -217,7 +217,7 @@ class TestToolCallLine:
         (line,) = [x for x in parsed(log_lines) if x["event"] == "tool.call"]
         assert line["tool"] == "fs_list"
         assert line["subject"] == "the-sub"
-        assert line["outcome"] == "ok"
+        assert line["outcome"] == "success"
         assert line["duration_ms"] >= 0
 
     def test_a_tool_error_result_is_outcome_error(
