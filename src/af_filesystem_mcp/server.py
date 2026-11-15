@@ -20,7 +20,6 @@ broker-only.
 
 from __future__ import annotations
 
-import logging
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -39,6 +38,11 @@ from af_filesystem_mcp.auth.broker import (
 from af_filesystem_mcp.auth.broker import resolve_identity as broker_resolve_identity
 from af_filesystem_mcp.auth.local import local_identity
 from af_filesystem_mcp.budgets import Budgets
+from af_filesystem_mcp.observability import (
+    RequestLogMiddleware,
+    ToolCallMiddleware,
+    configure_logging,
+)
 from af_filesystem_mcp.roots import RootsConfig
 from af_filesystem_mcp.tools import grep_files, list_dir, read_file, stat_path
 
@@ -129,6 +133,7 @@ def _make_broker_app(
         instructions=_INSTRUCTIONS,
         lifespan=_lifespan,
         token_verifier=mcp_verifier,
+        middleware=[ToolCallMiddleware()],
         auth=AuthSettings(
             issuer_url=AnyHttpUrl(resource_url),
             # The aggregator injects the bearer itself; there is no OAuth
@@ -145,18 +150,11 @@ def _make_broker_app(
 
     mcp.custom_route("/healthz", methods=["GET"])(_healthz)
 
-    return mcp.streamable_http_app(
+    app = mcp.streamable_http_app(
         streamable_http_path="/mcp", host=host, stateless_http=True
     )
-
-
-def _configure_logging(log_level: str) -> None:
-    """Apply the CLI log level to the root logger (HTTP transport only, see serve())."""
-    logging.basicConfig(
-        stream=sys.stderr,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
-    logging.getLogger().setLevel(log_level.upper())
+    app.add_middleware(RequestLogMiddleware)
+    return app
 
 
 def serve(
@@ -214,7 +212,7 @@ def serve(
         budgets=budgets,
     )
 
-    _configure_logging(log_level)
+    configure_logging(log_level)
     uvicorn.run(
         app,
         host=host,
@@ -222,4 +220,8 @@ def serve(
         proxy_headers=True,
         forwarded_allow_ips=forwarded_allow_ips,
         log_level=log_level,
+        # RequestLogMiddleware writes the access line, minus successful probes.
+        access_log=False,
+        # uvicorn's own lines go through configure_logging, as JSON.
+        log_config=None,
     )

@@ -82,6 +82,7 @@ src/af_filesystem_mcp/
 ├── cli.py             # argparse: `af-filesystem-mcp serve`
 ├── server.py          # stdio (local identity) + broker-mode HTTP transport
 ├── identity.py        # Identity(uid, gid, unixname) -- what every call impersonates
+├── observability.py   # X-Request-ID binding, JSON logs, access line, tool.call line
 ├── roots.py            # RootsConfig: the /home, /data prefix roots
 ├── paths.py            # resolve_confined, secure_open_confined, UserRoots
 ├── impersonate.py      # run_helper/run_helper_json: per-call impersonated subprocess
