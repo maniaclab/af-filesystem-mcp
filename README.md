@@ -66,7 +66,7 @@ pixi add af-filesystem-mcp
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.11+
 - Linux (the impersonation mechanism is POSIX `setuid`/`setgid`; there is no
   Windows/macOS deployment target — local `stdio` mode runs fine on any OS for
   development, since it never impersonates)

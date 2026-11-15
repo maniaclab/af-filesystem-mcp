@@ -108,7 +108,7 @@ async def run_helper(
 
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
         msg = f"filesystem helper timed out after {timeout}s running {argv[:1]!r}"
